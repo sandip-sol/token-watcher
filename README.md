@@ -101,7 +101,7 @@ npm install
 
 # Set up environment
 cp .env.example .env
-# Edit .env with your DATABASE_URL
+# Edit .env with your DATABASE_URL and DIRECT_URL
 
 # Set up database
 npx prisma migrate dev
@@ -230,6 +230,9 @@ Cost data is kept up to date by the community. Submit a PR to add new models!
 ```env
 # Database
 DATABASE_URL="postgresql://user:password@localhost:5432/tokenwatcher"
+# For Prisma migrations. With local Postgres this can match DATABASE_URL.
+# With Supabase, use the Direct connection URL instead of the pooler URL.
+DIRECT_URL="postgresql://user:password@localhost:5432/tokenwatcher"
 
 # Auth (generate with: openssl rand -base64 32)
 NEXTAUTH_SECRET="your-secret-here"

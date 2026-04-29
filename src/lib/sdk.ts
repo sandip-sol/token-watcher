@@ -120,8 +120,25 @@ export class TokenWatcher {
       tags: options.tags,
     }
 
+    // ── Anthropic response shape ─────────────────────────────
+    if (
+      result &&
+      typeof result === 'object' &&
+      (options.provider === 'anthropic' || ('content' in result && 'usage' in result))
+    ) {
+      const r = result as WithAnthropicUsage
+      if (r.usage) {
+        payload.inputTokens = r.usage.input_tokens ?? 0
+        payload.outputTokens = r.usage.output_tokens ?? 0
+      }
+
+      if (options.storePrompt && 'content' in result) {
+        const content = (result as { content?: Array<{ text?: string }> }).content
+        payload.completion = content?.[0]?.text ?? undefined
+      }
+    }
     // ── OpenAI response shape ────────────────────────────────
-    if (result && typeof result === 'object' && 'usage' in result) {
+    else if (result && typeof result === 'object' && 'usage' in result) {
       const r = result as WithUsage
       if (r.usage) {
         payload.inputTokens = r.usage.prompt_tokens ?? r.usage.input_tokens ?? 0
@@ -132,20 +149,6 @@ export class TokenWatcher {
       if (options.storePrompt && 'choices' in result) {
         const choices = (result as { choices?: Array<{ message?: { content?: string } }> }).choices
         payload.completion = choices?.[0]?.message?.content ?? undefined
-      }
-    }
-
-    // ── Anthropic response shape ─────────────────────────────
-    if (result && typeof result === 'object' && 'content' in result && 'usage' in result) {
-      const r = result as WithAnthropicUsage
-      if (r.usage) {
-        payload.inputTokens = r.usage.input_tokens ?? 0
-        payload.outputTokens = r.usage.output_tokens ?? 0
-      }
-
-      if (options.storePrompt && 'content' in result) {
-        const content = (result as { content?: Array<{ text?: string }> }).content
-        payload.completion = content?.[0]?.text ?? undefined
       }
     }
 

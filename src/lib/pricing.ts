@@ -11,6 +11,8 @@ export interface ModelPrice {
 
 export const MODEL_PRICING: ModelPrice[] = [
   // ─── OpenAI ───────────────────────────────────────────────
+  { provider: 'openai', model: 'gpt-4.1',              inputPer1M: 2.00,   outputPer1M: 8.00   },
+  { provider: 'openai', model: 'gpt-4.1-mini',         inputPer1M: 0.40,   outputPer1M: 1.60   },
   { provider: 'openai', model: 'gpt-4o',                inputPer1M: 2.50,   outputPer1M: 10.00  },
   { provider: 'openai', model: 'gpt-4o-mini',           inputPer1M: 0.15,   outputPer1M: 0.60   },
   { provider: 'openai', model: 'gpt-4-turbo',           inputPer1M: 10.00,  outputPer1M: 30.00  },
@@ -29,6 +31,8 @@ export const MODEL_PRICING: ModelPrice[] = [
   { provider: 'anthropic', model: 'claude-sonnet-4-6',        inputPer1M: 3.00,  outputPer1M: 15.00 },
 
   // ─── Google ───────────────────────────────────────────────
+  { provider: 'google', model: 'gemini-2.5-pro',       inputPer1M: 1.25,  outputPer1M: 10.00  },
+  { provider: 'google', model: 'gemini-2.5-flash',     inputPer1M: 0.15,  outputPer1M: 0.60   },
   { provider: 'google', model: 'gemini-1.5-pro',         inputPer1M: 3.50,  outputPer1M: 10.50  },
   { provider: 'google', model: 'gemini-1.5-flash',       inputPer1M: 0.075, outputPer1M: 0.30   },
   { provider: 'google', model: 'gemini-1.5-flash-8b',    inputPer1M: 0.0375,outputPer1M: 0.15   },

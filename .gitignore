@@ -8,6 +8,7 @@ out/
 # production
 build/
 dist/
+*.tsbuildinfo
 
 # env files
 .env

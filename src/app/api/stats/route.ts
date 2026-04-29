@@ -8,8 +8,9 @@ export async function GET(req: NextRequest) {
   const groupBy = searchParams.get('groupBy') ?? 'day' // 'day' | 'model' | 'provider' | 'tag'
   const tagKey = searchParams.get('tagKey') ?? null
 
+  const safeDays = Math.min(Math.max(1, days), 365)
   const since = new Date()
-  since.setDate(since.getDate() - days)
+  since.setDate(since.getDate() - safeDays)
 
   // ── Overview stats ───────────────────────────────────────
   const overview = await prisma.lLMEvent.aggregate({
@@ -56,28 +57,27 @@ export async function GET(req: NextRequest) {
   let tagBreakdown: Array<{ tagValue: string; totalCost: number; totalTokens: number }> = []
 
   if (tagKey) {
-    // Fetch all events and group by tag value in JS
-    // (Postgres JSON field grouping requires more complex SQL)
-    const events = await prisma.lLMEvent.findMany({
-      where: { createdAt: { gte: since } },
-      select: { tags: true, totalCostUsd: true, totalTokens: true },
-    })
+    const tagRows = await prisma.$queryRaw<Array<{
+      tag_value: string
+      total_cost: number
+      total_tokens: bigint
+    }>>`
+      SELECT
+        tags->>${tagKey} AS tag_value,
+        SUM("totalCostUsd") AS total_cost,
+        SUM("totalTokens") AS total_tokens
+      FROM "LLMEvent"
+      WHERE "createdAt" >= ${since}
+        AND tags->>${tagKey} IS NOT NULL
+      GROUP BY tags->>${tagKey}
+      ORDER BY total_cost DESC
+    `
 
-    const tagMap = new Map<string, { totalCost: number; totalTokens: number }>()
-
-    for (const event of events) {
-      const tags = event.tags as Record<string, string>
-      const val = tags[tagKey] ?? '(untagged)'
-      const existing = tagMap.get(val) ?? { totalCost: 0, totalTokens: 0 }
-      tagMap.set(val, {
-        totalCost: existing.totalCost + event.totalCostUsd,
-        totalTokens: existing.totalTokens + event.totalTokens,
-      })
-    }
-
-    tagBreakdown = Array.from(tagMap.entries())
-      .map(([tagValue, stats]) => ({ tagValue, ...stats }))
-      .sort((a, b) => b.totalCost - a.totalCost)
+    tagBreakdown = tagRows.map(row => ({
+      tagValue: row.tag_value,
+      totalCost: Number(row.total_cost),
+      totalTokens: Number(row.total_tokens),
+    }))
   }
 
   // ── Today vs yesterday ───────────────────────────────────

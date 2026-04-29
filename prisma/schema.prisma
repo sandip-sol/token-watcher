@@ -1,0 +1,89 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model LLMEvent {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+
+  // Model info
+  provider    String   // "openai" | "anthropic" | "google" | "ollama" | "custom"
+  model       String   // "gpt-4o" | "claude-sonnet-4-20250514" etc.
+
+  // Usage
+  inputTokens  Int
+  outputTokens Int
+  totalTokens  Int      @default(0)
+
+  // Cost (stored in USD, calculated at ingest time)
+  inputCostUsd  Float   @default(0)
+  outputCostUsd Float   @default(0)
+  totalCostUsd  Float   @default(0)
+
+  // Performance
+  latencyMs   Int?
+
+  // Tagging — stored as flat key-value for easy filtering
+  tags        Json     @default("{}")
+
+  // Optional: store request/response for debugging (can be disabled)
+  prompt      String?  @db.Text
+  completion  String?  @db.Text
+
+  @@index([createdAt])
+  @@index([provider])
+  @@index([model])
+}
+
+model ModelPricing {
+  id              String   @id @default(cuid())
+  provider        String
+  model           String
+  inputPer1MTokens  Float  // USD per 1M input tokens
+  outputPer1MTokens Float  // USD per 1M output tokens
+  updatedAt       DateTime @updatedAt
+
+  @@unique([provider, model])
+}
+
+model AlertRule {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  name        String
+  enabled     Boolean  @default(true)
+
+  // Trigger condition
+  metricType  String   // "daily_cost" | "hourly_cost" | "total_tokens"
+  threshold   Float    // e.g. 10.00 for $10
+  windowHours Int      @default(24)
+
+  // Optional filters
+  provider    String?
+  model       String?
+  tagKey      String?
+  tagValue    String?
+
+  // Notification targets
+  slackWebhook  String?
+  webhookUrl    String?
+  emailTo       String?
+
+  lastTriggeredAt DateTime?
+  lastCheckedAt   DateTime?
+}
+
+model ApiKey {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  name      String
+  keyHash   String   @unique
+  lastUsedAt DateTime?
+  enabled   Boolean  @default(true)
+}

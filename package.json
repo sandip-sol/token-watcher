@@ -1,0 +1,44 @@
+{
+  "name": "tokenwatcher",
+  "version": "0.1.0",
+  "description": "Open-source LLM cost & token usage auditor. Self-hosted, privacy-first.",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "db:seed": "npx ts-node prisma/seed.ts",
+    "postinstall": "prisma generate"
+  },
+  "keywords": [
+    "llm",
+    "openai",
+    "anthropic",
+    "token",
+    "cost",
+    "monitoring",
+    "observability",
+    "self-hosted",
+    "open-source",
+    "analytics"
+  ],
+  "dependencies": {
+    "@prisma/client": "^5.10.0",
+    "next": "^14.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^2.12.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "prisma": "^5.10.0",
+    "typescript": "^5.3.3"
+  }
+}

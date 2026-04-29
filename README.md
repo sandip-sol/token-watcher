@@ -8,9 +8,9 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-[![GitHub Stars](https://img.shields.io/github/stars/yourusername/tokenwatcher?style=social)](https://github.com/yourusername/tokenwatcher)
+[![GitHub Stars](https://img.shields.io/github/stars/sandip-sol/token-watcher?style=social)](https://github.com/sandip-sol/token-watcher)
 
-[**Live Demo**](https://tokenwatcher.dev) · [**Docs**](https://docs.tokenwatcher.dev) · [**Discord**](https://discord.gg/tokenwatcher) · [**Report Bug**](https://github.com/yourusername/tokenwatcher/issues)
+[**Docs**](https://docs.tokenwatcher.dev) · [**Report Bug**](https://github.com/sandip-sol/token-watcher/issues)
 
 ![TokenWatcher Dashboard](./docs/assets/dashboard-preview.png)
 
@@ -82,7 +82,7 @@ Every team using OpenAI, Anthropic, Gemini, or local models (Ollama) faces this.
 ### Option 1: Docker (Recommended)
 
 ```bash
-git clone https://github.com/yourusername/tokenwatcher.git
+git clone https://github.com/sandip-sol/token-watcher.git
 cd tokenwatcher
 cp .env.example .env
 docker compose up -d
@@ -93,7 +93,7 @@ Open [http://localhost:3000](http://localhost:3000) — done.
 ### Option 2: Manual
 
 ```bash
-git clone https://github.com/yourusername/tokenwatcher.git
+git clone https://github.com/sandip-sol/token-watcher.git
 cd tokenwatcher
 
 # Install dependencies
@@ -268,7 +268,7 @@ SMTP_PASS="your-smtp-password"
 
 We love contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for how to get started.
 
-Good first issues are tagged [`help wanted`](https://github.com/yourusername/tokenwatcher/issues?q=label%3A%22help+wanted%22).
+Good first issues are tagged [`help wanted`](https://github.com/sandip-sol/token-watcher/issues?q=label%3A%22help+wanted%22).
 
 ---
 

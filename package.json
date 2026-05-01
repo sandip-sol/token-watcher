@@ -5,10 +5,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:clean": "npm run clean && next dev",
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
     "test:sdk": "ts-node --esm test-sdk.ts",
+    "clean": "node -e \"require('node:fs').rmSync('.next', { recursive: true, force: true })\"",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",

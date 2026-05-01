@@ -66,6 +66,31 @@ export function getModelPrice(provider: string, model: string): ModelPrice | nul
   return null
 }
 
+export async function getModelPricing(provider: string, model: string): Promise<ModelPrice | null> {
+  try {
+    const { prisma } = await import('./prisma')
+    const exact = await (prisma as any).modelPricing.findUnique({
+      where: { provider_model: { provider, model } },
+    })
+
+    if (exact) {
+      return {
+        provider: exact.provider,
+        model: exact.model,
+        inputPer1M: exact.inputPer1MTokens,
+        outputPer1M: exact.outputPer1MTokens,
+      }
+    }
+  } catch (error) {
+    if (process.env.NODE_ENV !== 'test') {
+      const message = error instanceof Error ? error.message : 'Unknown pricing lookup failure'
+      console.warn('[TokenWatcher] DB model pricing lookup failed; falling back to static pricing:', message)
+    }
+  }
+
+  return getModelPrice(provider, model)
+}
+
 export function calculateCost(
   provider: string,
   model: string,
@@ -83,4 +108,26 @@ export function calculateCost(
   const totalCostUsd = inputCostUsd + outputCostUsd
 
   return { inputCostUsd, outputCostUsd, totalCostUsd }
+}
+
+export async function calculateCostWithPricing(
+  provider: string,
+  model: string,
+  inputTokens: number,
+  outputTokens: number
+): Promise<{ inputCostUsd: number; outputCostUsd: number; totalCostUsd: number }> {
+  const price = await getModelPricing(provider, model)
+
+  if (!price) {
+    return { inputCostUsd: 0, outputCostUsd: 0, totalCostUsd: 0 }
+  }
+
+  const inputCostUsd = (inputTokens / 1_000_000) * price.inputPer1M
+  const outputCostUsd = (outputTokens / 1_000_000) * price.outputPer1M
+
+  return {
+    inputCostUsd,
+    outputCostUsd,
+    totalCostUsd: inputCostUsd + outputCostUsd,
+  }
 }

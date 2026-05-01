@@ -1,0 +1,24 @@
+{
+  "name": "@tokenwatcher/sdk",
+  "version": "0.1.0",
+  "description": "Typed TokenWatcher SDK for tracking LLM usage, errors, and latency.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

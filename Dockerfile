@@ -5,7 +5,7 @@ COPY package*.json ./
 RUN npm ci --ignore-scripts
 COPY prisma ./prisma
 RUN npx prisma generate
-COPY tsconfig.json next-env.d.ts ./
+COPY tsconfig.json next-env.d.ts next.config.js middleware.ts ./
 COPY src ./src
 COPY public ./public
 RUN npm run build

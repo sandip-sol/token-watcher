@@ -9,11 +9,14 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
+    "test": "vitest run",
     "test:sdk": "ts-node --esm test-sdk.ts",
     "clean": "node -e \"require('node:fs').rmSync('.next', { recursive: true, force: true })\"",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
+    "db:backfill:workspaces": "ts-node scripts/backfill-workspaces.ts",
+    "db:rebuild-rollups": "tsx scripts/rebuild-rollups.ts",
     "db:seed": "npx ts-node prisma/seed.ts",
     "postinstall": "prisma generate"
   },
@@ -45,6 +48,8 @@
     "@types/react-dom": "^18.2.0",
     "prisma": "^5.10.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.3.3"
+    "tsx": "^4.21.0",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.5"
   }
 }

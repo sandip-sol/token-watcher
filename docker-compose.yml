@@ -27,9 +27,18 @@ services:
     environment:
       DATABASE_URL: postgresql://tokenwatcher:tokenwatcher@db:5432/tokenwatcher
       DIRECT_URL: postgresql://tokenwatcher:tokenwatcher@db:5432/tokenwatcher
+      DASHBOARD_AUTH_ENABLED: ${DASHBOARD_AUTH_ENABLED:-true}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-admin}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-change_me_in_production}
+      DASHBOARD_SESSION_SECRET: ${DASHBOARD_SESSION_SECRET:-change-me-in-production}
+      DASHBOARD_SESSION_COOKIE_NAME: ${DASHBOARD_SESSION_COOKIE_NAME:-tokenwatcher_session}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change-me-in-production}
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
       TOKENWATCHER_API_KEY: ${TOKENWATCHER_API_KEY:-tw_dev_key_change_me}
+      INGEST_RATE_LIMIT_ENABLED: ${INGEST_RATE_LIMIT_ENABLED:-true}
+      INGEST_RATE_LIMIT_WINDOW_SECONDS: ${INGEST_RATE_LIMIT_WINDOW_SECONDS:-60}
+      INGEST_RATE_LIMIT_MAX_REQUESTS: ${INGEST_RATE_LIMIT_MAX_REQUESTS:-120}
+      INGEST_ALLOWED_ORIGINS: ${INGEST_ALLOWED_ORIGINS:-}
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
     depends_on:
       db:

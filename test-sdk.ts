@@ -16,6 +16,7 @@ await tw.ingest({
   model: 'claude-sonnet-4-6',
   inputTokens: 1200,
   outputTokens: 400,
+  projectSlug: 'default',
   latencyMs: 1100,
   tags: { feature: 'summarizer', env: 'test' },
 })

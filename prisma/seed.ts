@@ -23,14 +23,40 @@ function randomBetween(min: number, max: number) {
 async function main() {
   console.log('🌱 Seeding TokenWatcher with 30 days of sample data...')
 
+  const workspace = await prisma.workspace.upsert({
+    where: { slug: 'default' },
+    update: {},
+    create: {
+      id: 'default_workspace',
+      name: 'Default Workspace',
+      slug: 'default',
+    },
+  })
+
+  const project = await prisma.project.upsert({
+    where: { workspaceId_slug: { workspaceId: workspace.id, slug: 'default' } },
+    update: {},
+    create: {
+      id: workspace.id === 'default_workspace' ? 'default_project' : undefined,
+      workspaceId: workspace.id,
+      name: 'Default Project',
+      slug: 'default',
+      environment: 'production',
+    },
+  })
+
   // Seed API key
   await prisma.apiKey.upsert({
     where: { keyHash: 'dev-seed-hash' },
     update: {},
     create: {
+      workspaceId: workspace.id,
+      projectId: project.id,
       name: 'Development Key',
       keyHash: 'dev-seed-hash',
-      enabled: true,
+      keyPrefix: 'tw_dev_seed',
+      environment: 'dev',
+      isActive: true,
     },
   })
 
@@ -70,6 +96,8 @@ async function main() {
       eventTime.setHours(randomBetween(0, 23), randomBetween(0, 59))
 
       events.push({
+        workspaceId: workspace.id,
+        projectId: project.id,
         provider: model.provider,
         model: model.model,
         inputTokens,
@@ -101,11 +129,11 @@ async function main() {
   // Seed a sample alert
   await prisma.alertRule.create({
     data: {
+      workspaceId: workspace.id,
       name: 'Daily spend > $20',
-      metricType: 'daily_cost',
+      type: 'daily_cost',
       threshold: 20.0,
-      windowHours: 24,
-      enabled: true,
+      isActive: true,
     },
   })
 

@@ -1,1 +1,1 @@
-
+Keep this directory so Docker builds can copy Next.js public assets even when there are no static assets yet.

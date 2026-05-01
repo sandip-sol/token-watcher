@@ -2,6 +2,39 @@
 
 TokenWatcher is a self-hosted LLM usage auditor. Your app sends token usage events to this project, the server stores them in PostgreSQL, and the dashboard shows spend, token volume, latency, and model breakdowns.
 
+Important: TokenWatcher does not automatically fetch usage from your OpenAI, Anthropic, Gemini, or Ollama account. The dashboard gets data only when an app sends usage events to `POST /api/ingest`. If the dashboard is empty, it means there are no `LLMEvent` rows in the database yet.
+
+If you already have `npm run dev` running, keep it running and open a second terminal. Then use one of these options:
+
+```bash
+# Option A: send one fake SDK event
+npm run test:sdk
+```
+
+```bash
+# Option B: send one event manually with curl
+curl -X POST http://localhost:3000/api/ingest \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer tw_dev_key_change_me" \
+  -d '{
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "inputTokens": 1200,
+    "outputTokens": 350,
+    "latencyMs": 900,
+    "tags": {
+      "feature": "manual-test",
+      "env": "local"
+    }
+  }'
+```
+
+After either option, refresh:
+
+```text
+http://localhost:3000/dashboard
+```
+
 ## How the Project Fits Together
 
 ```text
@@ -14,6 +47,27 @@ Your app or SDK test
   -> /api/stats aggregates saved events
   -> /dashboard renders charts and tables
 ```
+
+The most important table is `LLMEvent`. Every row means "one LLM call happened". The dashboard is just a visual report over those rows.
+
+Example event:
+
+```json
+{
+  "provider": "openai",
+  "model": "gpt-4o-mini",
+  "inputTokens": 1200,
+  "outputTokens": 350,
+  "latencyMs": 900,
+  "tags": {
+    "feature": "chat",
+    "userId": "user_123",
+    "env": "production"
+  }
+}
+```
+
+TokenWatcher receives that event, calculates cost using `src/lib/pricing.ts`, stores it in PostgreSQL, and then `/api/stats` sums it for the dashboard.
 
 ## Important Files
 
@@ -30,6 +84,134 @@ Your app or SDK test
 | `prisma/schema.prisma` | Database schema for events, model pricing, alert rules, and API keys. |
 | `prisma/seed.ts` | Creates sample dashboard data for the last 30 days. |
 | `test-sdk.ts` | Small local script that sends one fake LLM event without needing a real OpenAI or Anthropic key. |
+
+## Code Explanation in Detail
+
+### 1. Dashboard Route
+
+`src/app/page.tsx` is tiny:
+
+```ts
+redirect('/dashboard')
+```
+
+So when you visit `http://localhost:3000`, Next.js sends you to `http://localhost:3000/dashboard`.
+
+`src/app/dashboard/page.tsx` is a client component. It keeps three pieces of state:
+
+- `data`: the stats returned by `/api/stats`
+- `days`: selected period, such as 7, 14, 30, or 90 days
+- `loading`: whether the dashboard is currently fetching data
+
+This part fetches stats whenever `days` changes:
+
+```ts
+useEffect(() => {
+  setLoading(true)
+  fetch(`/api/stats?days=${days}`)
+    .then(r => r.json())
+    .then(setData)
+    .finally(() => setLoading(false))
+}, [days])
+```
+
+Then it passes the returned data into:
+
+- `StatCard` for spend, tokens, latency, and call count
+- `CostTrendChart` for spend over time
+- `ModelBreakdownChart` for model spend share
+- `ModelTable` for per-model totals
+
+### 2. Ingest API
+
+`src/app/api/ingest/route.ts` is where usage data enters the system.
+
+It expects a bearer token:
+
+```http
+Authorization: Bearer your_tokenwatcher_key
+```
+
+The key is checked by `validateApiKey()` from `src/lib/auth.ts`. In local development, if the sent key equals `TOKENWATCHER_API_KEY` from `.env`, the request is accepted.
+
+Then Zod validates the JSON body. Required fields are:
+
+- `provider`
+- `model`
+- `inputTokens`
+- `outputTokens`
+
+Optional fields are:
+
+- `latencyMs`
+- `tags`
+- `prompt`
+- `completion`
+- `totalCostUsd`
+
+After validation, the route calculates:
+
+```ts
+totalTokens = inputTokens + outputTokens
+```
+
+Then it calls:
+
+```ts
+calculateCost(provider, model, inputTokens, outputTokens)
+```
+
+That function looks up the model price in `src/lib/pricing.ts`. Finally, Prisma writes one row into `LLMEvent`.
+
+### 3. Stats API
+
+`src/app/api/stats/route.ts` reads events from PostgreSQL and aggregates them.
+
+It returns:
+
+- `overview`: total cost, total tokens, average latency, total calls
+- `today`: today's cost, tokens, and calls
+- `yesterday`: yesterday's cost, tokens, and calls
+- `byModel`: grouped totals per provider/model
+- `dailyTrend`: day-by-day spend and usage
+- `tagBreakdown`: optional grouped totals by tag
+
+The dashboard does not calculate these totals itself. It asks `/api/stats` for already-aggregated data.
+
+### 4. SDK
+
+`src/lib/sdk.ts` gives you two ways to send data.
+
+Use `ingest()` when you already know token counts:
+
+```ts
+await tw.ingest({
+  provider: 'openai',
+  model: 'gpt-4o-mini',
+  inputTokens: 1200,
+  outputTokens: 350,
+  latencyMs: 900,
+  tags: { feature: 'chat' },
+})
+```
+
+Use `track()` when you want to wrap a real LLM request:
+
+```ts
+const response = await tw.track(
+  () => openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages,
+  }),
+  {
+    provider: 'openai',
+    model: 'gpt-4o-mini',
+    tags: { feature: 'chat' },
+  }
+)
+```
+
+The SDK does not estimate tokens itself. It reads token usage from the LLM provider response, usually from a field called `usage`. If a provider response does not include usage, use `tw.ingest()` and pass token counts manually.
 
 ## Database Models
 
@@ -100,6 +282,8 @@ Open:
 http://localhost:3000/dashboard
 ```
 
+If the dashboard opens but shows zero data, that is normal for a fresh database. Send events using `npm run test:sdk`, `curl`, or a real wrapped LLM call.
+
 ## Test It for Real
 
 ### 1. Verify the App Builds
@@ -168,7 +352,7 @@ Refresh `/dashboard`; the call count and spend should increase.
 Make sure the app is running, then run:
 
 ```bash
-npx ts-node --esm test-sdk.ts
+npm run test:sdk
 ```
 
 Expected output:
@@ -179,9 +363,15 @@ Event sent! Check your dashboard.
 
 The script sends a fake Anthropic usage event, so you do not need a real Anthropic key. It reads `TOKENWATCHER_API_KEY` from `.env`; if that key is missing, it falls back to `tw_dev_key_change_me`.
 
+If your `.env` has a different app URL, you can also set:
+
+```env
+TOKENWATCHER_ENDPOINT="http://localhost:3000"
+```
+
 ### 5. Test a Real LLM Call From Another App
 
-Use the SDK pattern from `src/lib/sdk.ts`:
+Use the SDK pattern from `src/lib/sdk.ts`. This is the real way to fetch token use from your AI usage: wrap the actual AI call, let the provider return usage data, and let TokenWatcher save it.
 
 ```ts
 import { TokenWatcher } from './src/lib/sdk'
@@ -209,6 +399,43 @@ const response = await tw.track(
 ```
 
 The SDK returns the original LLM response immediately after the LLM call completes. Tracking is sent to TokenWatcher afterward.
+
+For OpenAI responses, the SDK tries to read:
+
+- `usage.prompt_tokens`
+- `usage.completion_tokens`
+
+For Anthropic-style responses, it tries to read:
+
+- `usage.input_tokens`
+- `usage.output_tokens`
+
+If those fields exist, your dashboard will update after the event is sent.
+
+## How to Get Data on the Dashboard
+
+Use this checklist:
+
+1. PostgreSQL is running.
+2. `.env` has `DATABASE_URL`, `DIRECT_URL`, and `TOKENWATCHER_API_KEY`.
+3. Migrations have been applied with `npm run db:migrate`.
+4. App is running with `npm run dev`.
+5. At least one event has been sent to `/api/ingest`.
+6. Open or refresh `http://localhost:3000/dashboard`.
+
+Fastest local test:
+
+```bash
+npm run test:sdk
+```
+
+Then confirm the raw stats:
+
+```bash
+curl http://localhost:3000/api/stats?days=30
+```
+
+If `overview.callCount` is greater than `0`, the dashboard has data to show.
 
 ## Useful Debugging Checks
 

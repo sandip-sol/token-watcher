@@ -13,6 +13,7 @@
     "incremental": true,
     "module": "esnext",
     "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
     "moduleResolution": "node",
     "baseUrl": ".",
     "paths": {

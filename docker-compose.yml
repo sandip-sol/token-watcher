@@ -21,10 +21,12 @@ services:
   app:
     build: .
     restart: unless-stopped
+    command: sh -c "npx prisma migrate deploy && npm start"
     ports:
       - "3000:3000"
     environment:
       DATABASE_URL: postgresql://tokenwatcher:tokenwatcher@db:5432/tokenwatcher
+      DIRECT_URL: postgresql://tokenwatcher:tokenwatcher@db:5432/tokenwatcher
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change-me-in-production}
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
       TOKENWATCHER_API_KEY: ${TOKENWATCHER_API_KEY:-tw_dev_key_change_me}

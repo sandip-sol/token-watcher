@@ -1,9 +1,11 @@
 // src/app/api/stats/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardAuth } from '@/lib/api-auth'
+import { requireDashboardAuth } from '@/server/auth/dashboard-api'
 import { prisma } from '@/lib/prisma'
-import { ROLLUP_ALL } from '@/lib/rollups'
-import { resolveWorkspaceSelection } from '@/lib/workspaces'
+import { ROLLUP_ALL } from '@/server/rollups/service'
+import { resolveWorkspaceSelection } from '@/server/workspaces/service'
+import { addUtcDays, parseDateRangeUtc, startOfUtcDay } from '@/server/time/utc'
+import { handleApiError, jsonError } from '@/server/security/errors'
 
 const db = prisma as any
 
@@ -26,12 +28,11 @@ export async function GET(req: NextRequest) {
     })
 
     if (selection.ok === false) {
-      return NextResponse.json({ error: selection.error }, { status: selection.status })
+      return jsonError(selection.status, selection.status === 404 ? 'NOT_FOUND' : 'BAD_REQUEST', selection.error)
     }
 
     const safeDays = Math.min(Math.max(1, days), 365)
-    const since = new Date()
-    since.setDate(since.getDate() - safeDays)
+    const { from: since, to } = parseDateRangeUtc({ days: String(safeDays) })
     const scopeWhere = {
       workspaceId: selection.workspaceId,
       ...(selection.projectId ? { projectId: selection.projectId } : {}),
@@ -101,8 +102,7 @@ export async function GET(req: NextRequest) {
       })
 
       const today = startOfUtcDay(new Date())
-      const yesterday = new Date(today)
-      yesterday.setUTCDate(yesterday.getUTCDate() - 1)
+      const yesterday = addUtcDays(today, -1)
       const [todayStats, yesterdayStats] = await Promise.all([
         db.dailyUsageRollup.aggregate({
           where: { ...rollupWhere, date: today },
@@ -167,7 +167,7 @@ export async function GET(req: NextRequest) {
 
     // ── Overview stats ───────────────────────────────────────
     const overview = await db.lLMEvent.aggregate({
-      where: { ...scopeWhere, createdAt: { gte: since } },
+      where: { ...scopeWhere, createdAt: { gte: since, lte: to } },
       _sum: {
         totalCostUsd: true,
         inputTokens: true,
@@ -178,14 +178,14 @@ export async function GET(req: NextRequest) {
       _count: { id: true },
     })
     const errorOverview = await db.lLMEvent.aggregate({
-      where: { ...scopeWhere, createdAt: { gte: since }, eventType: 'error' },
+      where: { ...scopeWhere, createdAt: { gte: since, lte: to }, eventType: 'error' },
       _count: { id: true },
     })
 
   // ── Cost by model ────────────────────────────────────────
   const byModel = await db.lLMEvent.groupBy({
     by: ['provider', 'model'],
-    where: { ...scopeWhere, createdAt: { gte: since } },
+    where: { ...scopeWhere, createdAt: { gte: since, lte: to } },
     _sum: { totalCostUsd: true, totalTokens: true, inputTokens: true, outputTokens: true },
     _count: { id: true },
     _avg: { latencyMs: true },
@@ -206,6 +206,7 @@ export async function GET(req: NextRequest) {
       COUNT(*) AS call_count
     FROM "LLMEvent"
     WHERE "createdAt" >= ${since}
+      AND "createdAt" <= ${to}
       AND "workspaceId" = ${selection.workspaceId}
       AND (${selection.projectId}::text IS NULL OR "projectId" = ${selection.projectId})
       AND (${provider}::text IS NULL OR "provider" = ${provider})
@@ -229,6 +230,7 @@ export async function GET(req: NextRequest) {
         SUM("totalTokens") AS total_tokens
       FROM "LLMEvent"
       WHERE "createdAt" >= ${since}
+        AND "createdAt" <= ${to}
         AND "workspaceId" = ${selection.workspaceId}
         AND (${selection.projectId}::text IS NULL OR "projectId" = ${selection.projectId})
         AND (${provider}::text IS NULL OR "provider" = ${provider})
@@ -246,11 +248,8 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Today vs yesterday ───────────────────────────────────
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
+  const today = startOfUtcDay(new Date())
+  const yesterday = addUtcDays(today, -1)
 
   const [todayStats, yesterdayStats] = await Promise.all([
     db.lLMEvent.aggregate({
@@ -317,13 +316,8 @@ export async function GET(req: NextRequest) {
       meta: { dataSource: 'raw' },
     })
   } catch (error) {
-    console.error('[TokenWatcher] Stats failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Stats failed')
   }
-}
-
-function startOfUtcDay(date: Date): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
 }
 
 async function getRawSqlRollupStats(input: {
@@ -415,8 +409,7 @@ async function getRawSqlRollupStats(input: {
   `
 
   const today = startOfUtcDay(new Date())
-  const yesterday = new Date(today)
-  yesterday.setUTCDate(yesterday.getUTCDate() - 1)
+  const yesterday = addUtcDays(today, -1)
   const [todayStats, yesterdayStats] = await Promise.all([
     rollupDaySummary(input, today),
     rollupDaySummary(input, yesterday),

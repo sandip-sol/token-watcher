@@ -6,7 +6,8 @@ import {
   getDashboardSessionCookieOptions,
   hasUsableDashboardSessionSecret,
   isDashboardAuthEnabled,
-} from '@/lib/dashboard-auth'
+} from '@/server/auth/dashboard-session'
+import { createCsrfToken, setCsrfCookie } from '@/server/auth/csrf'
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,6 +30,7 @@ export async function POST(req: NextRequest) {
     const token = await createDashboardSessionToken(username)
     const response = respondSuccess(req)
     response.cookies.set(getDashboardSessionCookieName(), token, getDashboardSessionCookieOptions())
+    setCsrfCookie(response, await createCsrfToken(token))
 
     return response
   } catch (error) {

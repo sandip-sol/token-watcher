@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardAuth } from '@/lib/api-auth'
+import { NextRequest } from 'next/server'
+import { requireDashboardAuth } from '@/server/auth/dashboard-api'
 import { prisma } from '@/lib/prisma'
-import { resolveWorkspaceSelection } from '@/lib/workspaces'
+import { resolveWorkspaceSelection } from '@/server/workspaces/service'
+import { handleApiError, jsonError, jsonOk } from '@/server/security/errors'
 
 export async function GET(req: NextRequest) {
   const authError = await requireDashboardAuth(req)
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
     })
 
     if (selection.ok === false) {
-      return NextResponse.json({ error: selection.error }, { status: selection.status })
+      return jsonError(selection.status, selection.status === 404 ? 'NOT_FOUND' : 'BAD_REQUEST', selection.error)
     }
 
     const history = await prisma.alertHistory.findMany({
@@ -37,9 +38,8 @@ export async function GET(req: NextRequest) {
       },
     })
 
-    return NextResponse.json({ history })
+    return jsonOk({ history })
   } catch (error) {
-    console.error('[TokenWatcher] Alert history failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Alert history failed')
   }
 }

@@ -1,8 +1,8 @@
-import type { TrackOptions, UsageExtractionResult } from '../types'
-import { extractAnthropicUsage } from './anthropic'
-import { extractGeminiUsage } from './gemini'
-import { extractOllamaUsage } from './ollama'
-import { extractOpenAIUsage } from './openai'
+import type { TrackOptions, UsageExtractionResult } from '../types.js'
+import { extractAnthropicUsage } from './anthropic.js'
+import { extractGeminiUsage } from './gemini.js'
+import { extractOllamaUsage } from './ollama.js'
+import { extractOpenAIUsage } from './openai.js'
 
 export function extractUsage(response: unknown, options: TrackOptions): UsageExtractionResult | null {
   if (Number.isFinite(options.inputTokens) || Number.isFinite(options.outputTokens)) {

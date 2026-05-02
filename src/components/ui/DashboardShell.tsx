@@ -1,23 +1,19 @@
 'use client'
 
-import Link from 'next/link'
-import { usePathname } from 'next/navigation'
 import type { ReactNode } from 'react'
+import { DashboardNav } from '@/components/dashboard/DashboardNav'
+import { dashboardFetch } from '@/lib/client/dashboard-fetch'
 
 type DashboardShellProps = {
   children: ReactNode
   actions?: ReactNode
 }
 
-const navItems = [
-  { href: '/dashboard', label: 'Overview' },
-  { href: '/dashboard/api-keys', label: 'API Keys' },
-  { href: '/dashboard/alerts', label: 'Alerts' },
-  { href: '/dashboard/projects', label: 'Projects / Settings' },
-]
-
 export function DashboardShell({ children, actions }: DashboardShellProps) {
-  const pathname = usePathname()
+  async function logout() {
+    await dashboardFetch('/api/auth/logout', { method: 'POST' }).catch(() => null)
+    window.location.href = '/login'
+  }
 
   return (
     <main className="tw-dashboard">
@@ -25,25 +21,15 @@ export function DashboardShell({ children, actions }: DashboardShellProps) {
         <div className="tw-header-left">
           <span className="tw-logo">TokenWatcher</span>
           <span className="tw-tagline">LLM Cost Auditor</span>
-          <nav className="tw-dashboard-nav" aria-label="Dashboard navigation">
-            {navItems.map(item => (
-              <Link
-                key={item.href}
-                className={`tw-nav-link ${pathname === item.href ? 'active' : ''}`}
-                href={item.href}
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
+          <DashboardNav />
         </div>
         <div className="tw-header-right">
           {actions}
-          <form className="tw-logout-form" action="/api/auth/logout" method="post">
-            <button className="tw-logout-btn" type="submit">
+          <div className="tw-logout-form">
+            <button className="tw-logout-btn" type="button" onClick={logout}>
               Logout
             </button>
-          </form>
+          </div>
         </div>
       </header>
 

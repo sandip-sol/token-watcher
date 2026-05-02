@@ -1,5 +1,5 @@
-import type { UsageExtractionResult } from '../types'
-import { numberOrUndefined } from '../utils/tokens'
+import type { UsageExtractionResult } from '../types.js'
+import { numberOrUndefined } from '../utils/tokens.js'
 
 export function extractOllamaUsage(response: unknown): UsageExtractionResult | null {
   if (!response || typeof response !== 'object') return null

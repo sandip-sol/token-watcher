@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { requireDashboardAuth } from '@/lib/api-auth'
-import { createSlug } from '@/lib/workspaces'
+import { requireDashboardWrite } from '@/server/auth/dashboard-api'
+import { createSlug } from '@/server/workspaces/service'
 import { prisma } from '@/lib/prisma'
+import { badRequest, conflict, handleApiError, jsonOk, notFound } from '@/server/security/errors'
 
 const UpdateWorkspaceSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
@@ -19,13 +20,13 @@ const workspaceSelect = {
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
-  const authError = await requireDashboardAuth(req)
+  const authError = await requireDashboardWrite(req)
   if (authError) return authError
 
   try {
     const parsed = UpdateWorkspaceSchema.safeParse(await req.json().catch(() => ({})))
     if (!parsed.success) {
-      return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+      return badRequest()
     }
 
     const nextSlug = parsed.data.slug ? createSlug(parsed.data.slug) : undefined
@@ -35,7 +36,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         select: { id: true },
       })
       if (existing && existing.id !== params.id) {
-        return NextResponse.json({ error: 'Workspace slug already exists' }, { status: 409 })
+        return conflict('Workspace slug already exists')
       }
     }
 
@@ -48,15 +49,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       select: workspaceSelect,
     })
 
-    return NextResponse.json({ workspace })
+    return jsonOk({ workspace })
   } catch (error) {
-    console.error('[TokenWatcher] Workspace update failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Workspace update failed')
   }
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const authError = await requireDashboardAuth(req)
+  const authError = await requireDashboardWrite(req)
   if (authError) return authError
 
   try {
@@ -65,7 +65,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       select: { _count: { select: { projects: true, apiKeys: true, events: true, alerts: true } } },
     })
 
-    if (!counts) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    if (!counts) return notFound()
 
     if (
       counts._count.projects > 0 ||
@@ -73,16 +73,12 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       counts._count.events > 0 ||
       counts._count.alerts > 0
     ) {
-      return NextResponse.json(
-        { error: 'Workspace has data and cannot be deleted in Phase 3' },
-        { status: 409 }
-      )
+      return conflict('Workspace has data and cannot be deleted in Phase 3')
     }
 
     await prisma.workspace.delete({ where: { id: params.id } })
-    return NextResponse.json({ success: true })
+    return jsonOk({ success: true })
   } catch (error) {
-    console.error('[TokenWatcher] Workspace delete failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Workspace delete failed')
   }
 }

@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { requireDashboardAuth } from '@/lib/api-auth'
+import { requireDashboardWrite } from '@/server/auth/dashboard-api'
 import { prisma } from '@/lib/prisma'
+import { badRequest, handleApiError, jsonOk } from '@/server/security/errors'
 
 const UpdateApiKeySchema = z.object({
   name: z.string().trim().max(100).nullable().optional(),
@@ -23,13 +24,13 @@ const apiKeySelect = {
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
-  const authError = await requireDashboardAuth(req)
+  const authError = await requireDashboardWrite(req)
   if (authError) return authError
 
   try {
     const parsed = UpdateApiKeySchema.safeParse(await req.json().catch(() => ({})))
     if (!parsed.success) {
-      return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+      return badRequest()
     }
 
     const apiKey = await prisma.apiKey.update({
@@ -38,15 +39,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       select: apiKeySelect,
     })
 
-    return NextResponse.json({ apiKey })
+    return jsonOk({ apiKey })
   } catch (error) {
-    console.error('[TokenWatcher] API key update failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'API key update failed')
   }
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const authError = await requireDashboardAuth(req)
+  const authError = await requireDashboardWrite(req)
   if (authError) return authError
 
   try {
@@ -56,9 +56,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       select: apiKeySelect,
     })
 
-    return NextResponse.json({ apiKey })
+    return jsonOk({ apiKey })
   } catch (error) {
-    console.error('[TokenWatcher] API key revoke failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'API key revoke failed')
   }
 }

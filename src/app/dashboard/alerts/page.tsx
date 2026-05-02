@@ -1,49 +1,30 @@
 'use client'
 
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { AlertForm, type AlertFormState } from '@/components/dashboard/AlertForm'
+import { AlertHistoryTable, type AlertHistoryRow } from '@/components/dashboard/AlertHistoryTable'
+import { AlertTable, type AlertRuleRow } from '@/components/dashboard/AlertTable'
+import { ErrorMessage } from '@/components/dashboard/ErrorMessage'
 import { DashboardShell } from '@/components/ui/DashboardShell'
-
-type AlertRule = {
-  id: string
-  workspaceId: string
-  projectId: string | null
-  name: string
-  type: string
-  threshold: number
-  provider: string | null
-  model: string | null
-  webhookUrl: string | null
-  isActive: boolean
-  lastTriggeredAt: string | null
-  createdAt: string
-  workspace: { name: string } | null
-  project: { name: string } | null
-}
-
-type AlertHistory = {
-  id: string
-  triggeredAt: string
-  type: string
-  value: number
-  threshold: number
-  status: string
-  error: string | null
-  alertRule: { name: string; type: string } | null
-}
+import { dashboardFetch, deleteJson, getJson, patchJson, postJson } from '@/lib/client/dashboard-fetch'
 
 type Workspace = { id: string; name: string }
 type Project = { id: string; workspaceId: string; name: string }
 
-const alertTypeLabels: Record<string, string> = {
-  daily_cost: 'Daily cost',
-  monthly_cost: 'Monthly cost',
-  daily_tokens: 'Daily tokens',
-  model_daily_cost: 'Per-model daily cost',
+const initialForm: AlertFormState = {
+  name: '',
+  type: 'daily_cost',
+  threshold: '',
+  provider: '',
+  model: '',
+  webhookUrl: '',
+  projectId: '',
+  isActive: true,
 }
 
 export default function AlertsPage() {
-  const [alerts, setAlerts] = useState<AlertRule[]>([])
-  const [history, setHistory] = useState<AlertHistory[]>([])
+  const [alerts, setAlerts] = useState<AlertRuleRow[]>([])
+  const [history, setHistory] = useState<AlertHistoryRow[]>([])
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [workspaceId, setWorkspaceId] = useState('')
@@ -52,68 +33,30 @@ export default function AlertsPage() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
-  const [form, setForm] = useState({
-    name: '',
-    type: 'daily_cost',
-    threshold: '',
-    provider: '',
-    model: '',
-    webhookUrl: '',
-    projectId: '',
-    isActive: true,
-  })
+  const [form, setForm] = useState<AlertFormState>(initialForm)
 
-  useEffect(() => {
-    loadWorkspaces()
-  }, [])
-
-  useEffect(() => {
-    if (!workspaceId) return
-    fetch(`/api/projects?workspaceId=${encodeURIComponent(workspaceId)}`)
-      .then(response => response.json())
-      .then(body => setProjects(body.projects || []))
-      .catch(() => setProjects([]))
-    loadAlerts(workspaceId, projectId)
-  }, [workspaceId, projectId])
-
-  async function loadWorkspaces() {
+  const loadWorkspaces = useCallback(async function loadWorkspaces() {
     try {
-      const response = await fetch('/api/workspaces')
-      if (response.status === 401) {
-        window.location.href = '/login'
-        return
-      }
-
-      if (!response.ok) throw new Error('Unable to load workspaces')
-      const body = await response.json()
+      const body = await getJson<{ workspaces: Workspace[] }>('/api/workspaces')
       setWorkspaces(body.workspaces || [])
-      if (body.workspaces?.[0]) setWorkspaceId(body.workspaces[0].id)
+      setWorkspaceId(current => current || body.workspaces?.[0]?.id || '')
     } catch {
       setError('Workspaces could not be loaded.')
     }
-  }
+  }, [])
 
-  async function loadAlerts(nextWorkspaceId = workspaceId, nextProjectId = projectId) {
+  const loadAlerts = useCallback(async function loadAlerts(nextWorkspaceId = workspaceId, nextProjectId = projectId) {
     setLoading(true)
     setError('')
 
     try {
       const params = new URLSearchParams({ workspaceId: nextWorkspaceId })
       if (nextProjectId) params.set('projectId', nextProjectId)
-      const [alertsResponse, historyResponse] = await Promise.all([
-        fetch(`/api/alerts?${params.toString()}`),
-        fetch(`/api/alerts/history?${params.toString()}`),
+      const [alertsBody, historyBody] = await Promise.all([
+        getJson<{ alerts: AlertRuleRow[] }>(`/api/alerts?${params.toString()}`),
+        getJson<{ history: AlertHistoryRow[] }>(`/api/alerts/history?${params.toString()}`),
       ])
 
-      if (alertsResponse.status === 401 || historyResponse.status === 401) {
-        window.location.href = '/login'
-        return
-      }
-
-      if (!alertsResponse.ok || !historyResponse.ok) throw new Error('Unable to load alerts')
-
-      const alertsBody = await alertsResponse.json()
-      const historyBody = await historyResponse.json()
       setAlerts(alertsBody.alerts)
       setHistory(historyBody.history)
     } catch {
@@ -121,7 +64,19 @@ export default function AlertsPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [projectId, workspaceId])
+
+  useEffect(() => {
+    loadWorkspaces()
+  }, [loadWorkspaces])
+
+  useEffect(() => {
+    if (!workspaceId) return
+    getJson<{ projects: Project[] }>(`/api/projects?workspaceId=${encodeURIComponent(workspaceId)}`)
+      .then(body => setProjects(body.projects || []))
+      .catch(() => setProjects([]))
+    loadAlerts(workspaceId, projectId)
+  }, [workspaceId, projectId, loadAlerts])
 
   async function createAlert(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -130,32 +85,17 @@ export default function AlertsPage() {
     setMessage('')
 
     try {
-      const response = await fetch('/api/alerts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          workspaceId,
-          projectId: form.projectId || null,
-          threshold: Number(form.threshold),
-          provider: form.provider || null,
-          model: form.model || null,
-          webhookUrl: form.webhookUrl || null,
-        }),
+      await postJson('/api/alerts', {
+        ...form,
+        workspaceId,
+        projectId: form.projectId || null,
+        threshold: Number(form.threshold),
+        provider: form.provider || null,
+        model: form.model || null,
+        webhookUrl: form.webhookUrl || null,
       })
-
-      if (!response.ok) throw new Error('Unable to create alert')
       setMessage('Alert created.')
-      setForm({
-        name: '',
-        type: 'daily_cost',
-        threshold: '',
-        provider: '',
-        model: '',
-        webhookUrl: '',
-        projectId: '',
-        isActive: true,
-      })
+      setForm(initialForm)
       await loadAlerts()
     } catch {
       setError('Alert could not be created. Check the type, threshold, model, and webhook URL.')
@@ -164,12 +104,11 @@ export default function AlertsPage() {
     }
   }
 
-  async function toggleAlert(alert: AlertRule) {
+  async function toggleAlert(alert: AlertRuleRow) {
     await updateAlert(alert.id, { isActive: !alert.isActive }, alert.isActive ? 'Alert deactivated.' : 'Alert activated.')
   }
 
   async function deactivateAlert(id: string) {
-    if (!window.confirm('Deactivate this alert? It will stop sending webhook notifications.')) return
     await updateAlert(id, null, 'Alert deactivated.', 'DELETE')
   }
 
@@ -178,8 +117,7 @@ export default function AlertsPage() {
     setMessage('')
 
     try {
-      const response = await fetch(`/api/alerts/${id}/test`, { method: 'POST' })
-      if (!response.ok) throw new Error('Unable to send test webhook')
+      await dashboardFetch(`/api/alerts/${id}/test`, { method: 'POST' })
       setMessage('Test webhook sent.')
     } catch {
       setError('Test webhook could not be sent.')
@@ -191,8 +129,7 @@ export default function AlertsPage() {
     setMessage('')
 
     try {
-      const response = await fetch('/api/alerts/evaluate', { method: 'POST' })
-      if (!response.ok) throw new Error('Unable to evaluate alerts')
+      await dashboardFetch('/api/alerts/evaluate', { method: 'POST' })
       setMessage('Alert evaluation completed.')
       await loadAlerts()
     } catch {
@@ -205,13 +142,11 @@ export default function AlertsPage() {
     setMessage('')
 
     try {
-      const response = await fetch(`/api/alerts/${id}`, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-      })
-
-      if (!response.ok) throw new Error('Unable to update alert')
+      if (method === 'DELETE') {
+        await deleteJson(`/api/alerts/${id}`)
+      } else {
+        await patchJson(`/api/alerts/${id}`, body)
+      }
       setMessage(success)
       await loadAlerts()
     } catch {
@@ -228,165 +163,34 @@ export default function AlertsPage() {
             Send webhook notifications when cost or token thresholds are crossed. Daily and monthly windows use UTC.
           </p>
 
-          <form className="tw-form-grid" onSubmit={createAlert}>
-            <label className="tw-field">
-              Workspace
-              <select required value={workspaceId} onChange={event => {
-                setWorkspaceId(event.target.value)
-                setProjectId('')
-                setForm({ ...form, projectId: '' })
-              }}>
-                {workspaces.map(workspace => (
-                  <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="tw-field">
-              Project scope
-              <select value={form.projectId} onChange={event => setForm({ ...form, projectId: event.target.value })}>
-                <option value="">All projects</option>
-                {projects.map(project => (
-                  <option key={project.id} value={project.id}>{project.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="tw-field">
-              Alert name
-              <input required maxLength={100} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} />
-            </label>
-            <label className="tw-field">
-              Alert type
-              <select value={form.type} onChange={event => setForm({ ...form, type: event.target.value })}>
-                <option value="daily_cost">Daily cost</option>
-                <option value="monthly_cost">Monthly cost</option>
-                <option value="daily_tokens">Daily tokens</option>
-                <option value="model_daily_cost">Per-model daily cost</option>
-              </select>
-            </label>
-            <label className="tw-field">
-              Threshold
-              <input required min="0" step="0.0001" type="number" value={form.threshold} onChange={event => setForm({ ...form, threshold: event.target.value })} />
-            </label>
-            <label className="tw-field">
-              Provider
-              <input maxLength={50} value={form.provider} onChange={event => setForm({ ...form, provider: event.target.value })} placeholder="openai" />
-            </label>
-            <label className="tw-field">
-              Model
-              <input maxLength={100} value={form.model} onChange={event => setForm({ ...form, model: event.target.value })} placeholder="gpt-4o-mini" />
-            </label>
-            <label className="tw-field">
-              Webhook URL
-              <input value={form.webhookUrl} onChange={event => setForm({ ...form, webhookUrl: event.target.value })} placeholder="https://example.com/tokenwatcher" />
-            </label>
-            <label className="tw-check-field">
-              <input type="checkbox" checked={form.isActive} onChange={event => setForm({ ...form, isActive: event.target.checked })} />
-              Active
-            </label>
-            <button className="tw-primary-btn" type="submit" disabled={saving}>
-              {saving ? 'Creating...' : 'Create alert'}
-            </button>
-          </form>
+          <AlertForm
+            workspaces={workspaces}
+            projects={projects}
+            workspaceId={workspaceId}
+            form={form}
+            saving={saving}
+            onWorkspaceChange={nextWorkspaceId => {
+              setWorkspaceId(nextWorkspaceId)
+              setProjectId('')
+              setForm({ ...form, projectId: '' })
+            }}
+            onFormChange={setForm}
+            onSubmit={createAlert}
+          />
 
           {message ? <p className="tw-inline-success">{message}</p> : null}
-          {error ? <p className="tw-form-error">{error}</p> : null}
+          <ErrorMessage message={error} />
         </div>
 
-        <div className="tw-table-card">
-          <h2 className="tw-chart-title">Alert Rules</h2>
-          {loading ? (
-            <div className="tw-empty-state">Loading alerts...</div>
-          ) : alerts.length === 0 ? (
-            <div className="tw-empty-state">No alerts configured</div>
-          ) : (
-            <div className="tw-table-wrap">
-              <table className="tw-model-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Type</th>
-                    <th>Threshold</th>
-                    <th>Filter</th>
-                    <th>Scope</th>
-                    <th>Status</th>
-                    <th>Last Triggered</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {alerts.map(alert => (
-                    <tr key={alert.id}>
-                      <td className="tw-model-name">{alert.name}</td>
-                      <td>{alertTypeLabels[alert.type] || alert.type}</td>
-                      <td>{alert.threshold}</td>
-                      <td>{formatFilter(alert)}</td>
-                      <td>{alert.workspace?.name || alert.workspaceId} / {alert.project?.name || 'All projects'}</td>
-                      <td>{alert.isActive ? 'Active' : 'Inactive'}</td>
-                      <td>{alert.lastTriggeredAt ? formatDate(alert.lastTriggeredAt) : 'Never'}</td>
-                      <td className="tw-action-cell">
-                        <button className="tw-secondary-btn" type="button" onClick={() => toggleAlert(alert)}>
-                          {alert.isActive ? 'Disable' : 'Enable'}
-                        </button>
-                        <button className="tw-secondary-btn" type="button" onClick={() => testAlert(alert.id)}>
-                          Test
-                        </button>
-                        <button className="tw-danger-btn" type="button" onClick={() => deactivateAlert(alert.id)}>
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        <div className="tw-table-card">
-          <h2 className="tw-chart-title">Alert History</h2>
-          {loading ? (
-            <div className="tw-empty-state">Loading alert history...</div>
-          ) : history.length === 0 ? (
-            <div className="tw-empty-state">No alert history yet</div>
-          ) : (
-            <div className="tw-table-wrap">
-              <table className="tw-model-table">
-                <thead>
-                  <tr>
-                    <th>Triggered</th>
-                    <th>Alert</th>
-                    <th>Value</th>
-                    <th>Threshold</th>
-                    <th>Status</th>
-                    <th>Error</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map(item => (
-                    <tr key={item.id}>
-                      <td>{formatDate(item.triggeredAt)}</td>
-                      <td>{item.alertRule?.name || alertTypeLabels[item.type] || item.type}</td>
-                      <td>{item.value.toFixed(4)}</td>
-                      <td>{item.threshold}</td>
-                      <td>{item.status}</td>
-                      <td>{item.error ? item.error.slice(0, 120) : ''}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+        <AlertTable
+          alerts={alerts}
+          loading={loading}
+          onToggle={toggleAlert}
+          onTest={testAlert}
+          onDeactivate={deactivateAlert}
+        />
+        <AlertHistoryTable history={history} loading={loading} />
       </section>
     </DashboardShell>
   )
-}
-
-function formatDate(value: string): string {
-  return new Date(value).toLocaleString()
-}
-
-function formatFilter(alert: AlertRule): string {
-  const parts = [alert.provider, alert.model].filter(Boolean)
-  return parts.length > 0 ? parts.join(' / ') : 'All traffic'
 }

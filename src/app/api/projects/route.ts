@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { requireDashboardAuth } from '@/lib/api-auth'
-import { createSlug, ensureDefaultWorkspaceAndProject, ensureUniqueProjectSlug } from '@/lib/workspaces'
+import { requireDashboardAuth, requireDashboardWrite } from '@/server/auth/dashboard-api'
+import { createSlug, ensureDefaultWorkspaceAndProject, ensureUniqueProjectSlug } from '@/server/workspaces/service'
 import { prisma } from '@/lib/prisma'
+import { badRequest, handleApiError, jsonOk, notFound } from '@/server/security/errors'
 
 const environments = ['production', 'staging', 'development', 'test'] as const
 
@@ -41,21 +42,20 @@ export async function GET(req: NextRequest) {
       orderBy: [{ slug: 'asc' }, { createdAt: 'asc' }],
     })
 
-    return NextResponse.json({ projects })
+    return jsonOk({ projects })
   } catch (error) {
-    console.error('[TokenWatcher] Project list failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Project list failed')
   }
 }
 
 export async function POST(req: NextRequest) {
-  const authError = await requireDashboardAuth(req)
+  const authError = await requireDashboardWrite(req)
   if (authError) return authError
 
   try {
     const parsed = ProjectSchema.safeParse(await req.json().catch(() => ({})))
     if (!parsed.success) {
-      return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+      return badRequest()
     }
 
     const workspace = await prisma.workspace.findUnique({
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     })
 
     if (!workspace) {
-      return NextResponse.json({ error: 'Workspace not found' }, { status: 404 })
+      return notFound('Workspace not found')
     }
 
     const slug = await ensureUniqueProjectSlug(
@@ -82,9 +82,8 @@ export async function POST(req: NextRequest) {
       select: projectSelect,
     })
 
-    return NextResponse.json({ project }, { status: 201 })
+    return jsonOk({ project }, { status: 201 })
   } catch (error) {
-    console.error('[TokenWatcher] Project creation failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Project creation failed')
   }
 }

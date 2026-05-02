@@ -1,10 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardAuthOrCron } from '@/lib/api-auth'
-import { evaluateAlerts } from '@/lib/alerts'
-import { resolveWorkspaceSelection } from '@/lib/workspaces'
+import { NextRequest } from 'next/server'
+import { requireDashboardWriteOrCron } from '@/server/auth/dashboard-api'
+import { evaluateAlerts } from '@/server/alerts/service'
+import { resolveWorkspaceSelection } from '@/server/workspaces/service'
+import { handleApiError, jsonError, jsonOk } from '@/server/security/errors'
 
 export async function POST(req: NextRequest) {
-  const authError = await requireDashboardAuthOrCron(req)
+  const authError = await requireDashboardWriteOrCron(req)
   if (authError) return authError
 
   try {
@@ -15,16 +16,15 @@ export async function POST(req: NextRequest) {
     if (workspaceId || projectId) {
       const selection = await resolveWorkspaceSelection({ workspaceId, projectId })
       if (selection.ok === false) {
-        return NextResponse.json({ error: selection.error }, { status: selection.status })
+        return jsonError(selection.status, selection.status === 404 ? 'NOT_FOUND' : 'BAD_REQUEST', selection.error)
       }
       await evaluateAlerts({ workspaceId: selection.workspaceId, projectId: selection.projectId })
     } else {
       await evaluateAlerts()
     }
 
-    return NextResponse.json({ success: true })
+    return jsonOk({ success: true })
   } catch (error) {
-    console.error('[TokenWatcher] Manual alert evaluation failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Manual alert evaluation failed')
   }
 }

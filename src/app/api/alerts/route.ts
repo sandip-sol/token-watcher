@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardAuth } from '@/lib/api-auth'
-import { CreateAlertRuleSchema } from '@/lib/alert-validation'
+import { NextRequest } from 'next/server'
+import { requireDashboardAuth, requireDashboardWrite } from '@/server/auth/dashboard-api'
+import { CreateAlertRuleSchema } from '@/server/alerts/schema'
 import { prisma } from '@/lib/prisma'
-import { resolveWorkspaceSelection } from '@/lib/workspaces'
+import { resolveWorkspaceSelection } from '@/server/workspaces/service'
+import { badRequest, handleApiError, jsonError, jsonOk, notFound } from '@/server/security/errors'
 
 const alertRuleSelect = {
   id: true,
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
     })
 
     if (selection.ok === false) {
-      return NextResponse.json({ error: selection.error }, { status: selection.status })
+      return jsonError(selection.status, selection.status === 404 ? 'NOT_FOUND' : 'BAD_REQUEST', selection.error)
     }
 
     const alerts = await prisma.alertRule.findMany({
@@ -46,21 +47,20 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: 'desc' },
     })
 
-    return NextResponse.json({ alerts })
+    return jsonOk({ alerts })
   } catch (error) {
-    console.error('[TokenWatcher] Alert list failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Alert list failed')
   }
 }
 
 export async function POST(req: NextRequest) {
-  const authError = await requireDashboardAuth(req)
+  const authError = await requireDashboardWrite(req)
   if (authError) return authError
 
   try {
     const parsed = CreateAlertRuleSchema.safeParse(await req.json().catch(() => ({})))
     if (!parsed.success) {
-      return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+      return badRequest()
     }
 
     const data = parsed.data
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
       select: { id: true },
     })
 
-    if (!workspace) return NextResponse.json({ error: 'Workspace not found' }, { status: 404 })
+    if (!workspace) return notFound('Workspace not found')
 
     if (data.projectId) {
       const project = await prisma.project.findFirst({
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
       })
 
       if (!project) {
-        return NextResponse.json({ error: 'Project not found in workspace' }, { status: 400 })
+        return badRequest('Project not found in workspace')
       }
     }
 
@@ -97,9 +97,8 @@ export async function POST(req: NextRequest) {
       select: alertRuleSelect,
     })
 
-    return NextResponse.json({ alert }, { status: 201 })
+    return jsonOk({ alert }, { status: 201 })
   } catch (error) {
-    console.error('[TokenWatcher] Alert creation failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Alert creation failed')
   }
 }

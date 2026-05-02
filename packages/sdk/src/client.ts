@@ -6,10 +6,10 @@ import type {
   TokenWatcherTags,
   TrackOptions,
   TrackStreamOptions,
-} from './types'
-import { extractUsage } from './providers/generic'
-import { EventQueue } from './utils/queue'
-import { normalizeEndpoint, sendEvents } from './utils/fetch'
+} from './types.js'
+import { extractUsage } from './providers/generic.js'
+import { EventQueue } from './utils/queue.js'
+import { normalizeEndpoint, sendEvents } from './utils/fetch.js'
 
 const DEFAULTS = {
   endpoint: 'http://localhost:3000/api/ingest',

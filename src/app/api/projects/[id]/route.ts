@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { requireDashboardAuth } from '@/lib/api-auth'
-import { createSlug } from '@/lib/workspaces'
+import { requireDashboardWrite } from '@/server/auth/dashboard-api'
+import { createSlug } from '@/server/workspaces/service'
 import { prisma } from '@/lib/prisma'
+import { badRequest, conflict, handleApiError, jsonOk, notFound } from '@/server/security/errors'
 
 const environments = ['production', 'staging', 'development', 'test'] as const
 
@@ -26,13 +27,13 @@ const projectSelect = {
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
-  const authError = await requireDashboardAuth(req)
+  const authError = await requireDashboardWrite(req)
   if (authError) return authError
 
   try {
     const parsed = UpdateProjectSchema.safeParse(await req.json().catch(() => ({})))
     if (!parsed.success) {
-      return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+      return badRequest()
     }
 
     const existingProject = parsed.data.slug
@@ -44,13 +45,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const nextSlug = parsed.data.slug ? createSlug(parsed.data.slug) : undefined
 
     if (nextSlug) {
-      if (!existingProject) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      if (!existingProject) return notFound()
       const existingSlug = await prisma.project.findUnique({
         where: { workspaceId_slug: { workspaceId: existingProject.workspaceId, slug: nextSlug } },
         select: { id: true },
       })
       if (existingSlug && existingSlug.id !== params.id) {
-        return NextResponse.json({ error: 'Project slug already exists in workspace' }, { status: 409 })
+        return conflict('Project slug already exists in workspace')
       }
     }
 
@@ -65,15 +66,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       select: projectSelect,
     })
 
-    return NextResponse.json({ project })
+    return jsonOk({ project })
   } catch (error) {
-    console.error('[TokenWatcher] Project update failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Project update failed')
   }
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const authError = await requireDashboardAuth(req)
+  const authError = await requireDashboardWrite(req)
   if (authError) return authError
 
   try {
@@ -82,19 +82,15 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       select: { _count: { select: { apiKeys: true, events: true, alerts: true } } },
     })
 
-    if (!counts) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    if (!counts) return notFound()
 
     if (counts._count.apiKeys > 0 || counts._count.events > 0 || counts._count.alerts > 0) {
-      return NextResponse.json(
-        { error: 'Project has data and cannot be deleted in Phase 3' },
-        { status: 409 }
-      )
+      return conflict('Project has data and cannot be deleted in Phase 3')
     }
 
     await prisma.project.delete({ where: { id: params.id } })
-    return NextResponse.json({ success: true })
+    return jsonOk({ success: true })
   } catch (error) {
-    console.error('[TokenWatcher] Project delete failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Project delete failed')
   }
 }

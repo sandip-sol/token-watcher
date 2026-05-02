@@ -3,7 +3,8 @@ import {
   getDashboardSessionCookieName,
   isDashboardAuthEnabled,
   verifyDashboardSessionToken,
-} from '@/lib/dashboard-auth'
+} from '@/server/auth/dashboard-session'
+import { applySecurityHeaders } from '@/server/security/headers'
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
@@ -30,7 +31,7 @@ export async function middleware(req: NextRequest) {
     )
 
     if (!validSession) {
-      response = NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      response = NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Unauthorized' } }, { status: 401 })
       applySecurityHeaders(response)
       return response
     }
@@ -44,18 +45,6 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
-}
-
-function applySecurityHeaders(response: NextResponse) {
-  response.headers.set('X-Frame-Options', 'DENY')
-  response.headers.set('X-Content-Type-Options', 'nosniff')
-  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
-  response.headers.set(
-    'Permissions-Policy',
-    'camera=(), microphone=(), geolocation=(), payment=(), usb=(), fullscreen=(self)'
-  )
-  // TODO: Add a nonce-based CSP before public deployment. A strict CSP is
-  // intentionally deferred so Next.js dev mode and dashboard charts keep working.
 }
 
 function isProtectedDashboardApi(pathname: string): boolean {

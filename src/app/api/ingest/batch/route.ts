@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyApiKey } from '@/lib/auth'
-import { IngestSchema, MAX_BODY_BYTES, getMaxBatchSize, safeLogError, storeIngestEvent } from '@/lib/ingest'
-import { checkIngestRateLimit } from '@/lib/rate-limit'
+import { verifyApiKey } from '@/server/auth/api-keys'
+import {
+  IngestSchema,
+  MAX_BODY_BYTES,
+  getMaxBatchSize,
+  prepareIngestEvent,
+  safeLogError,
+  storePreparedIngestEventsTransaction,
+} from '@/server/ingest/service'
+import { checkIngestRateLimit } from '@/server/ingest/rate-limit'
 
 export async function OPTIONS(req: NextRequest) {
   const cors = getCorsHeaders(req)
@@ -63,22 +70,25 @@ export async function POST(req: NextRequest) {
       parsedEvents.push(parsed.data)
     }
 
-    const results = []
+    const preparedEvents = []
     for (const event of parsedEvents) {
-      const stored = await storeIngestEvent({
+      const prepared = await prepareIngestEvent({
         workspaceId: apiKeyResult.workspaceId,
         apiKeyProjectId: apiKeyResult.projectId,
         event,
       })
 
-      if (stored.ok === false) return json({ error: stored.error }, stored.status, cors.headers)
-      results.push(stored)
+      if (prepared.ok === false) return json({ error: prepared.error }, prepared.status, cors.headers)
+      preparedEvents.push(prepared.prepared)
     }
+
+    const storedEvents = await storePreparedIngestEventsTransaction(preparedEvents)
 
     return json({
       success: true,
-      accepted: results.length,
-      eventIds: results.map(result => result.event.id),
+      count: storedEvents.length,
+      accepted: storedEvents.length,
+      eventIds: storedEvents.map(event => event.id),
     }, 200, cors.headers)
   } catch (error) {
     console.error('[TokenWatcher] Batch ingest failed:', safeLogError(error))

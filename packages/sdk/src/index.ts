@@ -1,4 +1,4 @@
-export { TokenWatcher } from './client'
+export { TokenWatcher } from './client.js'
 export type {
   ErrorUsageEvent,
   ManualUsageEvent,
@@ -7,10 +7,10 @@ export type {
   TrackOptions,
   TrackStreamOptions,
   UsageExtractionResult,
-} from './types'
+} from './types.js'
 
-import { TokenWatcher } from './client'
-import type { TokenWatcherOptions, TrackOptions } from './types'
+import { TokenWatcher } from './client.js'
+import type { TokenWatcherOptions, TrackOptions } from './types.js'
 
 let defaultInstance: TokenWatcher | null = null
 

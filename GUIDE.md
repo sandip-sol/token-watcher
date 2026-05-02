@@ -77,7 +77,7 @@ TokenWatcher receives that event, calculates cost using `src/lib/pricing.ts`, st
 | `src/app/dashboard/page.tsx` | Client dashboard. Fetches `/api/stats`, controls the selected date range, and renders stat cards, charts, and the model table. |
 | `src/app/api/ingest/route.ts` | Main ingest endpoint. Accepts LLM usage events, checks the bearer API key, validates JSON with Zod, calculates cost, stores the event, and checks alert rules. |
 | `src/app/api/stats/route.ts` | Dashboard stats endpoint. Aggregates total spend, tokens, latency, today/yesterday comparisons, model totals, daily trends, and optional tag breakdowns. |
-| `src/lib/sdk.ts` | Local TypeScript SDK. Wraps LLM calls with `track()` or sends manual usage with `ingest()`. |
+| `packages/sdk` | TypeScript SDK workspace package. Import it as `@tokenwatcher/sdk`; `src/lib/sdk.ts` is only a local compatibility shim. |
 | `src/lib/pricing.ts` | Static model pricing table and cost calculation helpers. |
 | `src/lib/auth.ts` | API key hashing, generation, and validation. In development it accepts `TOKENWATCHER_API_KEY` directly from `.env`. |
 | `src/lib/prisma.ts` | Shared Prisma client. Reuses the client during development hot reloads. |
@@ -180,7 +180,7 @@ The dashboard does not calculate these totals itself. It asks `/api/stats` for a
 
 ### 4. SDK
 
-`src/lib/sdk.ts` gives you two ways to send data.
+The SDK lives in `packages/sdk` and is imported as `@tokenwatcher/sdk`. It gives you two ways to send data.
 
 Use `ingest()` when you already know token counts:
 
@@ -371,10 +371,10 @@ TOKENWATCHER_ENDPOINT="http://localhost:3000"
 
 ### 5. Test a Real LLM Call From Another App
 
-Use the SDK pattern from `src/lib/sdk.ts`. This is the real way to fetch token use from your AI usage: wrap the actual AI call, let the provider return usage data, and let TokenWatcher save it.
+Use the SDK from `@tokenwatcher/sdk`. This is the real way to fetch token use from your AI usage: wrap the actual AI call, let the provider return usage data, and let TokenWatcher save it. `src/lib/sdk.ts` remains only as a local compatibility shim.
 
 ```ts
-import { TokenWatcher } from './src/lib/sdk'
+import { TokenWatcher } from '@tokenwatcher/sdk'
 
 const tw = new TokenWatcher({
   endpoint: 'http://localhost:3000',

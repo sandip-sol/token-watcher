@@ -2,10 +2,12 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 RUN apk add --no-cache openssl
 COPY package*.json ./
+COPY packages/sdk/package.json ./packages/sdk/package.json
 RUN npm ci --ignore-scripts
 COPY prisma ./prisma
 RUN npx prisma generate
 COPY tsconfig.json next-env.d.ts next.config.js middleware.ts ./
+COPY packages ./packages
 COPY src ./src
 COPY public ./public
 RUN npm run build
@@ -17,6 +19,7 @@ RUN apk add --no-cache openssl
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/packages ./packages
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/prisma ./prisma
 EXPOSE 3000

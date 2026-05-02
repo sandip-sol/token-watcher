@@ -1,16 +1,17 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardAuth } from '@/lib/api-auth'
-import { sendWebhookAlert, type AlertType } from '@/lib/alerts'
+import { NextRequest } from 'next/server'
+import { requireDashboardWrite } from '@/server/auth/dashboard-api'
+import { sendWebhookAlert, type AlertType } from '@/server/alerts/service'
 import { prisma } from '@/lib/prisma'
+import { jsonError, jsonOk, notFound } from '@/server/security/errors'
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const authError = await requireDashboardAuth(req)
+  const authError = await requireDashboardWrite(req)
   if (authError) return authError
 
   try {
     const rule = await prisma.alertRule.findUnique({ where: { id: params.id } })
     if (!rule) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      return notFound()
     }
 
     await sendWebhookAlert(rule, {
@@ -28,9 +29,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       triggeredAt: new Date(),
     })
 
-    return NextResponse.json({ success: true })
+    return jsonOk({ success: true })
   } catch (error) {
-    console.error('[TokenWatcher] Test alert webhook failed:', error)
-    return NextResponse.json({ error: 'Webhook test failed' }, { status: 502 })
+    console.error('[TokenWatcher] Test alert webhook failed:', error instanceof Error ? error.message : 'Unknown error')
+    return jsonError(502, 'WEBHOOK_TEST_FAILED', 'Webhook test failed')
   }
 }

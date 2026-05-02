@@ -1,7 +1,12 @@
 'use client'
 
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { ErrorMessage } from '@/components/dashboard/ErrorMessage'
+import { ProjectForm } from '@/components/dashboard/ProjectForm'
+import { ProjectTable, type ProjectRow } from '@/components/dashboard/ProjectTable'
+import { WorkspaceForm } from '@/components/dashboard/WorkspaceForm'
 import { DashboardShell } from '@/components/ui/DashboardShell'
+import { getJson, postJson } from '@/lib/client/dashboard-fetch'
 
 type Workspace = {
   id: string
@@ -10,19 +15,9 @@ type Workspace = {
   _count?: { projects: number; apiKeys: number; events: number; alerts: number }
 }
 
-type Project = {
-  id: string
-  workspaceId: string
-  name: string
-  slug: string
-  description: string | null
-  environment: string | null
-  _count?: { apiKeys: number; events: number; alerts: number }
-}
-
 export default function ProjectsPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([])
-  const [projects, setProjects] = useState<Project[]>([])
+  const [projects, setProjects] = useState<ProjectRow[]>([])
   const [workspaceId, setWorkspaceId] = useState('')
   const [workspaceName, setWorkspaceName] = useState('')
   const [projectName, setProjectName] = useState('')
@@ -31,45 +26,37 @@ export default function ProjectsPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    loadWorkspaces()
-  }, [])
-
-  useEffect(() => {
-    if (workspaceId) loadProjects(workspaceId)
-  }, [workspaceId])
-
-  async function loadWorkspaces() {
+  const loadWorkspaces = useCallback(async function loadWorkspaces() {
     setLoading(true)
     setError('')
 
     try {
-      const response = await fetch('/api/workspaces')
-      if (response.status === 401) {
-        window.location.href = '/login'
-        return
-      }
-      if (!response.ok) throw new Error('Unable to load workspaces')
-      const body = await response.json()
+      const body = await getJson<{ workspaces: Workspace[] }>('/api/workspaces')
       setWorkspaces(body.workspaces || [])
-      if (!workspaceId && body.workspaces?.[0]) setWorkspaceId(body.workspaces[0].id)
+      setWorkspaceId(current => current || body.workspaces?.[0]?.id || '')
     } catch {
       setError('Workspaces could not be loaded.')
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  async function loadProjects(nextWorkspaceId = workspaceId) {
+  const loadProjects = useCallback(async function loadProjects(nextWorkspaceId = workspaceId) {
     try {
-      const response = await fetch(`/api/projects?workspaceId=${encodeURIComponent(nextWorkspaceId)}`)
-      if (!response.ok) throw new Error('Unable to load projects')
-      const body = await response.json()
+      const body = await getJson<{ projects: ProjectRow[] }>(`/api/projects?workspaceId=${encodeURIComponent(nextWorkspaceId)}`)
       setProjects(body.projects || [])
     } catch {
       setError('Projects could not be loaded.')
     }
-  }
+  }, [workspaceId])
+
+  useEffect(() => {
+    loadWorkspaces()
+  }, [loadWorkspaces])
+
+  useEffect(() => {
+    if (workspaceId) loadProjects(workspaceId)
+  }, [workspaceId, loadProjects])
 
   async function createWorkspace(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -77,13 +64,7 @@ export default function ProjectsPage() {
     setMessage('')
 
     try {
-      const response = await fetch('/api/workspaces', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: workspaceName }),
-      })
-      if (!response.ok) throw new Error('Unable to create workspace')
-      const body = await response.json()
+      const body = await postJson<{ workspace: Workspace }>('/api/workspaces', { name: workspaceName })
       setWorkspaceName('')
       setMessage('Workspace created.')
       await loadWorkspaces()
@@ -99,16 +80,11 @@ export default function ProjectsPage() {
     setMessage('')
 
     try {
-      const response = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspaceId,
-          name: projectName,
-          environment: projectEnvironment,
-        }),
+      await postJson('/api/projects', {
+        workspaceId,
+        name: projectName,
+        environment: projectEnvironment,
       })
-      if (!response.ok) throw new Error('Unable to create project')
       setProjectName('')
       setProjectEnvironment('production')
       setMessage('Project created.')
@@ -128,79 +104,28 @@ export default function ProjectsPage() {
           </p>
 
           <div className="tw-settings-grid">
-            <form className="tw-form-grid" onSubmit={createWorkspace}>
-              <label className="tw-field">
-                New workspace
-                <input required maxLength={100} value={workspaceName} onChange={event => setWorkspaceName(event.target.value)} placeholder="Acme AI" />
-              </label>
-              <button className="tw-primary-btn" type="submit">Create workspace</button>
-            </form>
-
-            <form className="tw-form-grid" onSubmit={createProject}>
-              <label className="tw-field">
-                Workspace
-                <select required value={workspaceId} onChange={event => setWorkspaceId(event.target.value)}>
-                  {workspaces.map(workspace => (
-                    <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="tw-field">
-                New project
-                <input required maxLength={100} value={projectName} onChange={event => setProjectName(event.target.value)} placeholder="Production app" />
-              </label>
-              <label className="tw-field">
-                Environment
-                <select value={projectEnvironment} onChange={event => setProjectEnvironment(event.target.value)}>
-                  <option value="production">Production</option>
-                  <option value="staging">Staging</option>
-                  <option value="development">Development</option>
-                  <option value="test">Test</option>
-                </select>
-              </label>
-              <button className="tw-primary-btn" type="submit">Create project</button>
-            </form>
+            <WorkspaceForm
+              workspaceName={workspaceName}
+              onWorkspaceNameChange={setWorkspaceName}
+              onSubmit={createWorkspace}
+            />
+            <ProjectForm
+              workspaces={workspaces}
+              workspaceId={workspaceId}
+              projectName={projectName}
+              projectEnvironment={projectEnvironment}
+              onWorkspaceChange={setWorkspaceId}
+              onProjectNameChange={setProjectName}
+              onProjectEnvironmentChange={setProjectEnvironment}
+              onSubmit={createProject}
+            />
           </div>
 
           {message ? <p className="tw-inline-success">{message}</p> : null}
-          {error ? <p className="tw-form-error">{error}</p> : null}
+          <ErrorMessage message={error} />
         </div>
 
-        <div className="tw-table-card">
-          <h2 className="tw-chart-title">Projects</h2>
-          {loading ? (
-            <div className="tw-empty-state">Loading projects...</div>
-          ) : projects.length === 0 ? (
-            <div className="tw-empty-state">No projects yet</div>
-          ) : (
-            <div className="tw-table-wrap">
-              <table className="tw-model-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Slug</th>
-                    <th>Environment</th>
-                    <th>API Keys</th>
-                    <th>Events</th>
-                    <th>Alerts</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {projects.map(project => (
-                    <tr key={project.id}>
-                      <td className="tw-model-name">{project.name}</td>
-                      <td><code>{project.slug}</code></td>
-                      <td>{project.environment || 'Unspecified'}</td>
-                      <td>{project._count?.apiKeys ?? 0}</td>
-                      <td>{project._count?.events ?? 0}</td>
-                      <td>{project._count?.alerts ?? 0}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+        <ProjectTable projects={projects} loading={loading} />
       </section>
     </DashboardShell>
   )

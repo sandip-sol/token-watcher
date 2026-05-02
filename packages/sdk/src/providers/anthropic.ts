@@ -1,5 +1,5 @@
-import type { UsageExtractionResult } from '../types'
-import { numberOrUndefined } from '../utils/tokens'
+import type { UsageExtractionResult } from '../types.js'
+import { numberOrUndefined } from '../utils/tokens.js'
 
 export function extractAnthropicUsage(response: unknown): UsageExtractionResult | null {
   const usage = response && typeof response === 'object' ? (response as { usage?: unknown }).usage : null

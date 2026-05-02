@@ -1,5 +1,5 @@
-import type { IngestPayload, SendOptions } from '../types'
-import { backoffDelayMs, shouldRetryStatus, sleep } from './retry'
+import type { IngestPayload, SendOptions } from '../types.js'
+import { backoffDelayMs, shouldRetryStatus, sleep } from './retry.js'
 
 export class TokenWatcherSendError extends Error {
   status?: number

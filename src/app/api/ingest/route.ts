@@ -1,8 +1,8 @@
 // src/app/api/ingest/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyApiKey } from '@/lib/auth'
-import { checkIngestRateLimit } from '@/lib/rate-limit'
-import { IngestSchema, MAX_BODY_BYTES, safeLogError, storeIngestEvent } from '@/lib/ingest'
+import { verifyApiKey } from '@/server/auth/api-keys'
+import { checkIngestRateLimit } from '@/server/ingest/rate-limit'
+import { IngestSchema, MAX_BODY_BYTES, safeLogError, storeIngestEvent } from '@/server/ingest/service'
 
 export async function OPTIONS(req: NextRequest) {
   const cors = getCorsHeaders(req)

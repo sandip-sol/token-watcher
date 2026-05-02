@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardAuth } from '@/lib/api-auth'
-import { UpdateAlertRuleSchema } from '@/lib/alert-validation'
+import { NextRequest } from 'next/server'
+import { requireDashboardWrite } from '@/server/auth/dashboard-api'
+import { UpdateAlertRuleSchema } from '@/server/alerts/schema'
 import { prisma } from '@/lib/prisma'
+import { badRequest, handleApiError, jsonOk, notFound } from '@/server/security/errors'
 
 const alertRuleSelect = {
   id: true,
@@ -22,13 +23,13 @@ const alertRuleSelect = {
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
-  const authError = await requireDashboardAuth(req)
+  const authError = await requireDashboardWrite(req)
   if (authError) return authError
 
   try {
     const parsed = UpdateAlertRuleSchema.safeParse(await req.json().catch(() => ({})))
     if (!parsed.success) {
-      return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+      return badRequest()
     }
 
     if (parsed.data.projectId) {
@@ -36,7 +37,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         where: { id: params.id },
         select: { workspaceId: true },
       })
-      if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      if (!existing) return notFound()
 
       const project = await prisma.project.findFirst({
         where: {
@@ -47,7 +48,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       })
 
       if (!project) {
-        return NextResponse.json({ error: 'Project not found in workspace' }, { status: 400 })
+        return badRequest('Project not found in workspace')
       }
     }
 
@@ -57,15 +58,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       select: alertRuleSelect,
     })
 
-    return NextResponse.json({ alert })
+    return jsonOk({ alert })
   } catch (error) {
-    console.error('[TokenWatcher] Alert update failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Alert update failed')
   }
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const authError = await requireDashboardAuth(req)
+  const authError = await requireDashboardWrite(req)
   if (authError) return authError
 
   try {
@@ -75,9 +75,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       select: alertRuleSelect,
     })
 
-    return NextResponse.json({ alert })
+    return jsonOk({ alert })
   } catch (error) {
-    console.error('[TokenWatcher] Alert deactivate failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Alert deactivate failed')
   }
 }

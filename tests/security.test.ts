@@ -1,8 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { middleware } from '../middleware'
 import { createDashboardSessionToken } from '@/lib/dashboard-auth'
 import { resetIngestRateLimit } from '@/lib/rate-limit'
+import { createCsrfToken } from '@/server/auth/csrf'
+import { buildContentSecurityPolicy } from '@/server/security/headers'
+import { internalError, unauthorized } from '@/server/security/errors'
+import { dashboardFetch } from '@/lib/client/dashboard-fetch'
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
@@ -61,6 +65,7 @@ vi.mock('@/lib/prisma', () => ({
       findMany: vi.fn(),
     },
     $queryRaw: vi.fn(),
+    $transaction: vi.fn(),
   },
 }))
 
@@ -68,6 +73,7 @@ import { prisma } from '@/lib/prisma'
 import { hashApiKey } from '@/lib/auth'
 import { evaluateAlertRule } from '@/lib/alerts'
 import { rebuildDailyRollups, updateRollupsForEvent } from '@/lib/rollups'
+import { parseDateRangeUtc, startOfUtcDay, startOfUtcMonth } from '@/lib/date'
 import { createSlug, ensureDefaultWorkspaceAndProject } from '@/lib/workspaces'
 import { GET as apiKeysGet, POST as apiKeysPost } from '@/app/api/api-keys/route'
 import { DELETE as apiKeyDelete } from '@/app/api/api-keys/[id]/route'
@@ -79,6 +85,7 @@ import { GET as workspacesGet, POST as workspacesPost } from '@/app/api/workspac
 import { POST as ingestPost } from '@/app/api/ingest/route'
 import { POST as batchIngestPost } from '@/app/api/ingest/batch/route'
 import { POST as loginPost } from '@/app/api/auth/login/route'
+import { GET as csrfGet } from '@/app/api/auth/csrf/route'
 import { GET as statsGet } from '@/app/api/stats/route'
 
 const mockedPrisma = prisma as unknown as {
@@ -137,11 +144,16 @@ const mockedPrisma = prisma as unknown as {
     findMany: ReturnType<typeof vi.fn>
   }
   $queryRaw: ReturnType<typeof vi.fn>
+  $transaction: ReturnType<typeof vi.fn>
 }
 
 beforeEach(() => {
   process.env.ROLLUPS_ENABLED = 'false'
   process.env.ALERT_USE_ROLLUPS = 'false'
+  process.env.ALLOW_INGEST_COST_OVERRIDE = 'false'
+  process.env.INGEST_MAX_BATCH_SIZE = '100'
+  mockedPrisma.$transaction.mockImplementation(async (callback: (tx: unknown) => unknown) => callback(mockedPrisma))
+  mockedPrisma.apiKey.update.mockResolvedValue({} as never)
   mockedPrisma.modelPricing.findUnique.mockResolvedValue(null as never)
   mockedPrisma.dailyUsageRollup.aggregate.mockResolvedValue({ _sum: {} } as never)
   mockedPrisma.dailyUsageRollup.groupBy.mockResolvedValue([] as never)
@@ -154,6 +166,10 @@ beforeEach(() => {
 function mockDefaultScope() {
   process.env.ROLLUPS_ENABLED = 'false'
   process.env.ALERT_USE_ROLLUPS = 'false'
+  process.env.ALLOW_INGEST_COST_OVERRIDE = 'false'
+  process.env.INGEST_MAX_BATCH_SIZE = '100'
+  mockedPrisma.$transaction.mockImplementation(async (callback: (tx: unknown) => unknown) => callback(mockedPrisma))
+  mockedPrisma.apiKey.update.mockResolvedValue({} as never)
   mockedPrisma.modelPricing.findUnique.mockResolvedValue(null as never)
   mockedPrisma.dailyUsageRollup.aggregate.mockResolvedValue({ _sum: {} } as never)
   mockedPrisma.dailyUsageRollup.groupBy.mockResolvedValue([] as never)
@@ -214,7 +230,7 @@ describe('dashboard authentication', () => {
     const response = await middleware(new NextRequest('http://localhost:3000/api/stats'))
 
     expect(response.status).toBe(401)
-    await expect(response.json()).resolves.toEqual({ error: 'Unauthorized' })
+    await expect(response.json()).resolves.toEqual({ error: { code: 'UNAUTHORIZED', message: 'Unauthorized' } })
   })
 
   it('sets a session cookie for correct login credentials', async () => {
@@ -276,6 +292,147 @@ describe('dashboard authentication', () => {
   })
 })
 
+describe('dashboard csrf protection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockDefaultScope()
+    process.env.DASHBOARD_AUTH_ENABLED = 'true'
+    process.env.DASHBOARD_USERNAME = 'admin'
+    process.env.DASHBOARD_PASSWORD = 'secret_password'
+    process.env.DASHBOARD_SESSION_SECRET = 'test_secret_that_is_long_enough'
+    process.env.DASHBOARD_SESSION_COOKIE_NAME = 'tokenwatcher_session'
+  })
+
+  it('requires dashboard auth for csrf token requests', async () => {
+    const response = await csrfGet(new NextRequest('http://localhost:3000/api/auth/csrf'))
+
+    expect(response.status).toBe(401)
+  })
+
+  it('returns a csrf token and non-httpOnly csrf cookie for authenticated sessions', async () => {
+    const response = await csrfGet(await authedRequest('/api/auth/csrf'))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.csrfToken).toMatch(/^[^.]+\.[^.]+$/)
+    expect(response.headers.get('set-cookie')).toContain('tokenwatcher_csrf=')
+  })
+
+  it('rejects dashboard writes when csrf is missing or invalid', async () => {
+    const session = await createDashboardSessionToken('admin')
+    const missing = await workspacesPost(
+      jsonRequestWithCookie('/api/workspaces', { name: 'Acme AI' }, `tokenwatcher_session=${session}`)
+    )
+    const invalid = await workspacesPost(
+      jsonRequestWithCookie(
+        '/api/workspaces',
+        { name: 'Acme AI' },
+        `tokenwatcher_session=${session}; tokenwatcher_csrf=invalid.token`,
+        { 'x-csrf-token': 'invalid.token' }
+      )
+    )
+
+    expect(missing.status).toBe(403)
+    expect(invalid.status).toBe(403)
+  })
+
+  it('allows dashboard writes with a valid csrf token', async () => {
+    mockedPrisma.workspace.findUnique.mockResolvedValue(null as never)
+    mockedPrisma.workspace.create.mockResolvedValue({
+      id: 'workspace_2',
+      name: 'Acme AI',
+      slug: 'acme-ai',
+      createdAt: new Date('2026-05-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-05-01T00:00:00.000Z'),
+      _count: { projects: 1, apiKeys: 0, events: 0, alerts: 0 },
+    } as never)
+
+    const response = await workspacesPost(await authedJsonRequest('/api/workspaces', { name: 'Acme AI' }))
+
+    expect(response.status).toBe(201)
+  })
+
+  it('does not require csrf for bearer-token ingest endpoints', async () => {
+    const response = await ingestPost(ingestRequest(validPayload(), 'tw_live_valid'))
+
+    expect(response.status).not.toBe(403)
+  })
+})
+
+describe('security headers and safe errors', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockDefaultScope()
+    process.env.DASHBOARD_AUTH_ENABLED = 'false'
+  })
+
+  it('sets core security headers and a CSP with object-src none', async () => {
+    const response = await middleware(new NextRequest('http://localhost:3000/'))
+    const csp = response.headers.get('content-security-policy')
+
+    expect(response.headers.get('x-frame-options')).toBe('DENY')
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(csp).toContain("object-src 'none'")
+    expect(csp).toContain("frame-ancestors 'none'")
+  })
+
+  it('keeps production CSP stricter than development CSP', () => {
+    const production = buildContentSecurityPolicy('production')
+    const development = buildContentSecurityPolicy('development')
+
+    expect(production).toContain("script-src 'self'")
+    expect(production).not.toContain("'unsafe-eval'")
+    expect(development).toContain("'unsafe-eval'")
+  })
+
+  it('returns safe standardized API errors', async () => {
+    await expect(unauthorized().json()).resolves.toEqual({
+      error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
+    })
+    await expect(internalError().json()).resolves.toEqual({
+      error: { code: 'INTERNAL_ERROR', message: 'Internal server error' },
+    })
+  })
+})
+
+describe('dashboard fetch helper', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.stubGlobal('window', { location: { href: '' } })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('adds csrf to unsafe methods and not to GET requests', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: 'csrf.valid' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await dashboardFetch('/api/workspaces', { method: 'POST', body: JSON.stringify({ name: 'Acme' }) })
+    await dashboardFetch('/api/workspaces')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/auth/csrf', { credentials: 'same-origin' })
+    expect(fetchMock.mock.calls[1][1].headers.get('x-csrf-token')).toBe('csrf.valid')
+    expect(fetchMock.mock.calls[2][1].headers.has('x-csrf-token')).toBe(false)
+  })
+
+  it('parses standardized API errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 'FORBIDDEN', message: 'Forbidden' } }), { status: 403 })
+    ))
+
+    await expect(dashboardFetch('/api/workspaces')).rejects.toMatchObject({
+      status: 403,
+      code: 'FORBIDDEN',
+      message: 'Forbidden',
+    })
+  })
+})
+
 describe('ingest security', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -313,6 +470,65 @@ describe('ingest security', () => {
     expect(response.status).toBe(200)
     expect(body.success).toBe(true)
     expect(mockedPrisma.lLMEvent.create).toHaveBeenCalledOnce()
+  })
+
+  it('ignores client totalCostUsd by default and stores server-calculated cost', async () => {
+    const response = await ingestPost(
+      ingestRequest({ ...validPayload(), totalCostUsd: 999 }, 'tw_dev_test_secret')
+    )
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.cost.totalCostUsd).toBe(0.00075)
+    expect(mockedPrisma.lLMEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          inputCostUsd: 0.00025,
+          outputCostUsd: 0.0005,
+          totalCostUsd: 0.00075,
+        }),
+      })
+    )
+  })
+
+  it('accepts a valid totalCostUsd override only when explicitly enabled', async () => {
+    process.env.ALLOW_INGEST_COST_OVERRIDE = 'true'
+
+    const response = await ingestPost(
+      ingestRequest({ ...validPayload(), totalCostUsd: 12.34 }, 'tw_dev_test_secret')
+    )
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.cost.totalCostUsd).toBe(12.34)
+    expect(mockedPrisma.lLMEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          inputCostUsd: 0.00025,
+          outputCostUsd: 0.0005,
+          totalCostUsd: 12.34,
+        }),
+      })
+    )
+  })
+
+  it('rejects invalid totalCostUsd override values', async () => {
+    process.env.ALLOW_INGEST_COST_OVERRIDE = 'true'
+
+    const negative = await ingestPost(
+      ingestRequest({ ...validPayload(), totalCostUsd: -1 }, 'tw_dev_test_secret')
+    )
+    const tooLarge = await ingestPost(
+      ingestRequest({ ...validPayload(), totalCostUsd: 1_000_001 }, 'tw_dev_test_secret')
+    )
+    const notFinite = await ingestPost(
+      ingestRequest({ ...validPayload(), totalCostUsd: Number.NaN }, 'tw_dev_test_secret')
+    )
+
+    expect(negative.status).toBe(400)
+    expect(tooLarge.status).toBe(400)
+    expect(notFinite.status).toBe(400)
+    expect(mockedPrisma.lLMEvent.create).not.toHaveBeenCalled()
   })
 
   it('does not store prompt or completion when STORE_PROMPTS is false', async () => {
@@ -447,9 +663,95 @@ describe('ingest security', () => {
     )
 
     expect(accepted.status).toBe(200)
-    await expect(accepted.json()).resolves.toMatchObject({ success: true, accepted: 2 })
+    await expect(accepted.json()).resolves.toMatchObject({ success: true, count: 2, accepted: 2 })
     expect(tooLarge.status).toBe(413)
     expect(invalid.status).toBe(400)
+  })
+
+  it('does not store any batch events when one payload is invalid', async () => {
+    const response = await batchIngestPost(
+      batchIngestRequest({ events: [validPayload(), { ...validPayload(), inputTokens: -1 }] }, 'tw_dev_test_secret')
+    )
+
+    expect(response.status).toBe(400)
+    expect(mockedPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockedPrisma.lLMEvent.create).not.toHaveBeenCalled()
+  })
+
+  it('does not store any batch events when project resolution fails', async () => {
+    const rawKey = 'tw_live_workspace_batch_key'
+    mockedPrisma.apiKey.findUnique.mockResolvedValue({
+      id: 'key_workspace',
+      keyHash: hashApiKey(rawKey),
+      workspaceId: 'workspace_default',
+      projectId: null,
+      isActive: true,
+      revokedAt: null,
+    } as never)
+    mockedPrisma.project.findFirst.mockResolvedValueOnce({ id: 'project_default' } as never)
+    mockedPrisma.project.findFirst.mockResolvedValueOnce(null as never)
+
+    const response = await batchIngestPost(
+      batchIngestRequest({ events: [validPayload(), { ...validPayload(), projectSlug: 'missing-project' }] }, rawKey)
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: 'Project not found' })
+    expect(mockedPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockedPrisma.lLMEvent.create).not.toHaveBeenCalled()
+  })
+
+  it('does not store any batch events for cross-workspace project attempts', async () => {
+    const rawKey = 'tw_live_workspace_cross_batch_key'
+    mockedPrisma.apiKey.findUnique.mockResolvedValue({
+      id: 'key_workspace',
+      keyHash: hashApiKey(rawKey),
+      workspaceId: 'workspace_default',
+      projectId: null,
+      isActive: true,
+      revokedAt: null,
+    } as never)
+    mockedPrisma.project.findFirst.mockResolvedValueOnce({ id: 'project_default' } as never)
+    mockedPrisma.project.findFirst.mockResolvedValueOnce(null as never)
+
+    const response = await batchIngestPost(
+      batchIngestRequest({ events: [validPayload(), { ...validPayload(), projectId: 'other_workspace_project' }] }, rawKey)
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: 'Project not found' })
+    expect(mockedPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockedPrisma.lLMEvent.create).not.toHaveBeenCalled()
+  })
+
+  it('rolls back batch inserts when the transaction fails', async () => {
+    mockedPrisma.$transaction.mockRejectedValueOnce(new Error('database unavailable') as never)
+
+    const response = await batchIngestPost(
+      batchIngestRequest({ events: [validPayload(), validPayload()] }, 'tw_dev_test_secret')
+    )
+
+    expect(response.status).toBe(500)
+    expect(mockedPrisma.$transaction).toHaveBeenCalledOnce()
+    expect(mockedPrisma.alertRule.findMany).not.toHaveBeenCalled()
+    expect(mockedPrisma.dailyUsageRollup.upsert).not.toHaveBeenCalled()
+  })
+
+  it('runs batch rollups and alert evaluation only after a successful commit', async () => {
+    process.env.ROLLUPS_ENABLED = 'true'
+    mockedPrisma.lLMEvent.create.mockImplementation(({ data }) =>
+      Promise.resolve({ id: `event_${mockedPrisma.lLMEvent.create.mock.calls.length}`, createdAt: new Date('2026-05-01T12:34:00.000Z'), ...data })
+    )
+    mockedPrisma.alertRule.findMany.mockResolvedValue([] as never)
+
+    const response = await batchIngestPost(
+      batchIngestRequest({ events: [validPayload(), validPayload()] }, 'tw_dev_test_secret')
+    )
+
+    expect(response.status).toBe(200)
+    expect(mockedPrisma.$transaction).toHaveBeenCalledOnce()
+    expect(mockedPrisma.dailyUsageRollup.upsert).toHaveBeenCalled()
+    expect(mockedPrisma.alertRule.findMany).toHaveBeenCalledOnce()
   })
 })
 
@@ -684,6 +986,27 @@ describe('rollups', () => {
 
     expect(mockedPrisma.dailyUsageRollup.deleteMany).toHaveBeenCalled()
     expect(mockedPrisma.dailyUsageRollup.upsert).toHaveBeenCalled()
+  })
+})
+
+describe('UTC date boundaries', () => {
+  it('calculates UTC day and month starts', () => {
+    const date = new Date('2026-05-02T23:45:10.123+05:30')
+
+    expect(startOfUtcDay(date).toISOString()).toBe('2026-05-02T00:00:00.000Z')
+    expect(startOfUtcMonth(date).toISOString()).toBe('2026-05-01T00:00:00.000Z')
+  })
+
+  it('uses UTC starts for stats date ranges', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-02T18:30:00.000Z'))
+
+    const range = parseDateRangeUtc({ days: '7' })
+
+    expect(range.from.toISOString()).toBe('2026-04-26T00:00:00.000Z')
+    expect(range.to.toISOString()).toBe('2026-05-02T18:30:00.000Z')
+
+    vi.useRealTimers()
   })
 })
 
@@ -971,7 +1294,7 @@ describe('alert management and evaluation', () => {
       },
     ] as never)
 
-    const deactivateResponse = await alertDelete(await authedRequest('/api/alerts/alert_1'), {
+    const deactivateResponse = await alertDelete(await authedRequest('/api/alerts/alert_1', { method: 'DELETE' }), {
       params: { id: 'alert_1' },
     })
     const historyResponse = await alertHistoryGet(await authedRequest('/api/alerts/history'))
@@ -1020,6 +1343,42 @@ describe('alert management and evaluation', () => {
         where: expect.objectContaining({ provider: 'openai', model: 'gpt-4o' }),
       })
     )
+  })
+
+  it('evaluates daily and monthly alerts with UTC boundaries', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-02T18:30:00.000Z'))
+    mockedPrisma.lLMEvent.aggregate
+      .mockResolvedValueOnce({ _sum: { totalCostUsd: 5 } } as never)
+      .mockResolvedValueOnce({ _sum: { totalCostUsd: 5 } } as never)
+
+    await evaluateAlertRule(alertRule({ threshold: 10 }))
+    await evaluateAlertRule(alertRule({ type: 'monthly_cost', threshold: 10 }))
+
+    expect(mockedPrisma.lLMEvent.aggregate).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdAt: expect.objectContaining({
+            gte: new Date('2026-05-02T00:00:00.000Z'),
+            lte: new Date('2026-05-02T18:30:00.000Z'),
+          }),
+        }),
+      })
+    )
+    expect(mockedPrisma.lLMEvent.aggregate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdAt: expect.objectContaining({
+            gte: new Date('2026-05-01T00:00:00.000Z'),
+            lte: new Date('2026-05-02T18:30:00.000Z'),
+          }),
+        }),
+      })
+    )
+
+    vi.useRealTimers()
   })
 
   it('records failed webhook delivery without throwing', async () => {
@@ -1099,10 +1458,38 @@ function jsonRequest(path: string, body: unknown): NextRequest {
   })
 }
 
+function jsonRequestWithCookie(
+  path: string,
+  body: unknown,
+  cookie: string,
+  extraHeaders: Record<string, string> = {}
+): NextRequest {
+  return new NextRequest(`http://localhost:3000${path}`, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      cookie,
+      ...extraHeaders,
+    },
+    body: JSON.stringify(body),
+  })
+}
+
 async function authedRequest(path: string, init: RequestInit = {}): Promise<NextRequest> {
   const token = await createDashboardSessionToken('admin')
+  const method = (init.method || 'GET').toUpperCase()
+  const csrfToken = ['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)
+    ? await createCsrfToken(token)
+    : null
   const headers = new Headers(init.headers)
-  headers.set('cookie', `tokenwatcher_session=${token}`)
+  headers.set(
+    'cookie',
+    csrfToken
+      ? `tokenwatcher_session=${token}; tokenwatcher_csrf=${csrfToken}`
+      : `tokenwatcher_session=${token}`
+  )
+  if (csrfToken) headers.set('x-csrf-token', csrfToken)
 
   return new NextRequest(`http://localhost:3000${path}`, {
     ...init,

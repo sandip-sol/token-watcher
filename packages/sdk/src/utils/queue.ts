@@ -1,5 +1,5 @@
-import type { IngestPayload, SendOptions } from '../types'
-import { sendEvents } from './fetch'
+import type { IngestPayload, SendOptions } from '../types.js'
+import { sendEvents } from './fetch.js'
 
 export class EventQueue {
   private events: IngestPayload[] = []

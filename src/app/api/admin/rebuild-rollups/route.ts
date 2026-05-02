@@ -1,9 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { requireDashboardAuthOrCron } from '@/lib/api-auth'
-import { rebuildRollupsForDateRange } from '@/lib/rollups'
+import { NextRequest } from 'next/server'
+import { requireDashboardWriteOrCron } from '@/server/auth/dashboard-api'
+import { rebuildRollupsForDateRange } from '@/server/rollups/service'
+import { parseUtcDateInput } from '@/server/time/utc'
+import { handleApiError, jsonOk } from '@/server/security/errors'
 
 export async function POST(req: NextRequest) {
-  const authError = isValidRollupSecret(req) ? null : await requireDashboardAuthOrCron(req)
+  const authError = isValidRollupSecret(req) ? null : await requireDashboardWriteOrCron(req)
   if (authError) return authError
 
   try {
@@ -13,15 +15,14 @@ export async function POST(req: NextRequest) {
     const workspaceId = searchParams.get('workspaceId') || undefined
 
     await rebuildRollupsForDateRange({
-      from: from ? new Date(from) : undefined,
-      to: to ? new Date(to) : undefined,
+      from: from ? parseUtcDateInput(from) : undefined,
+      to: to ? parseUtcDateInput(to, true) : undefined,
       workspaceId,
     })
 
-    return NextResponse.json({ success: true })
+    return jsonOk({ success: true })
   } catch (error) {
-    console.error('[TokenWatcher] Manual rollup rebuild failed:', error instanceof Error ? error.message : 'Unknown error')
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Manual rollup rebuild failed')
   }
 }
 

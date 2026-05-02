@@ -119,7 +119,61 @@ npm run dev
 
 ---
 
+## Development Commands
+
+App:
+
+```bash
+npm run dev
+npm run build
+npm run test
+npm run typecheck
+```
+
+SDK:
+
+```bash
+npm run build:sdk
+npm run test:sdk
+npm run typecheck:sdk
+```
+
+Full repo:
+
+```bash
+npm run build:all
+npm run test:all
+npm run typecheck:all
+```
+
+Database:
+
+```bash
+npx prisma migrate dev
+npx prisma generate
+npm run db:backfill:workspaces
+npm run db:rebuild-rollups
+```
+
+The TypeScript SDK lives in `packages/sdk` and is configured as the `@tokenwatcher/sdk` npm workspace package. `src/lib/sdk.ts` remains only as a local compatibility shim for older internal imports.
+
+Backend/domain code lives under `src/server` by responsibility: dashboard auth and CSRF in `src/server/auth`, ingest in `src/server/ingest`, alerts in `src/server/alerts`, rollups in `src/server/rollups`, workspace/project helpers in `src/server/workspaces`, pricing in `src/server/pricing`, and security/time utilities in `src/server/security` and `src/server/time`. Dashboard UI pieces live in `src/components/dashboard`. `src/lib` is kept small for Prisma, SDK compatibility, and temporary re-export shims.
+
+For local SDK workspace development from the repo root:
+
+```bash
+npm install
+npm run build:sdk
+npm run test:sdk
+```
+
+The root workspace resolves `@tokenwatcher/sdk` for local development.
+
+---
+
 ## SDK Usage
+
+The SDK lives in `packages/sdk`. External apps should import from `@tokenwatcher/sdk`; local imports from `src/lib/sdk.ts` are kept only for compatibility.
 
 ### Install
 
@@ -273,7 +327,9 @@ Dashboard aggregate stats use rollups by default when `ROLLUPS_ENABLED` is not `
 
 ## Rollups
 
-Phase 4 adds `DailyUsageRollup` and `HourlyUsageRollup`. Ingest updates rollups in the background and never fails an accepted event if rollup updates fail. Raw `LLMEvent` rows remain the source of truth.
+Phase 4 adds `DailyUsageRollup` and `HourlyUsageRollup`. Ingest updates rollups in the background after events are committed and never fails an accepted event if rollup updates fail. Raw `LLMEvent` rows remain the source of truth.
+
+TokenWatcher uses UTC day, hour, and month boundaries for usage aggregation, rollups, stats, and alerts. This avoids server timezone drift and keeps dashboard totals consistent across deployments.
 
 Rebuild rollups from raw events:
 
@@ -288,6 +344,7 @@ Useful flags and env vars:
 ROLLUPS_ENABLED=false
 ALERT_USE_ROLLUPS=false
 INGEST_MAX_BATCH_SIZE=100
+ALLOW_INGEST_COST_OVERRIDE=false
 ```
 
 For large installs, run a nightly rollup rebuild and alert evaluation every 5-15 minutes. See [OPERATIONS.md](./OPERATIONS.md).
@@ -302,6 +359,7 @@ DASHBOARD_USERNAME="admin"
 DASHBOARD_PASSWORD="use-a-strong-password"
 DASHBOARD_SESSION_SECRET="generate-a-long-random-secret"
 DASHBOARD_SESSION_COOKIE_NAME="tokenwatcher_session"
+CSRF_SECRET=""
 ```
 
 Generate a strong session secret with:
@@ -311,6 +369,8 @@ openssl rand -base64 32
 ```
 
 The session is stored in an HTTP-only signed cookie. Disable dashboard auth only for trusted local development by setting `DASHBOARD_AUTH_ENABLED="false"`.
+
+Dashboard write APIs also require CSRF protection because they use cookie auth. The dashboard obtains a token from `GET /api/auth/csrf` and sends it as `X-CSRF-Token` on `POST`, `PATCH`, `PUT`, and `DELETE` requests. `CSRF_SECRET` is optional; when it is empty TokenWatcher signs CSRF tokens with `DASHBOARD_SESSION_SECRET`.
 
 ### API Keys
 
@@ -451,6 +511,14 @@ INGEST_RATE_LIMIT_MAX_REQUESTS="120"
 
 Limits are applied by API key identity when possible, otherwise by client IP. This is suitable for single-instance deployments only. Use Redis or another shared store before running multiple app instances.
 
+### Ingest Cost Integrity
+
+TokenWatcher calculates `totalCostUsd` server-side from provider, model, input tokens, and output tokens by default. Public ingest clients may send `totalCostUsd` for backward compatibility, but it is ignored unless `ALLOW_INGEST_COST_OVERRIDE="true"`.
+
+Keep `ALLOW_INGEST_COST_OVERRIDE="false"` for public deployments. Enabling it lets clients write cost values and is intended only for trusted internal debugging or controlled imports.
+
+Batch ingest is all-or-nothing: if any event in a batch is invalid or references an invalid project, no events from that batch are stored. Rollups and alerts run only after the batch commit succeeds.
+
 ### CORS for Ingest
 
 Server-to-server SDK calls work without CORS configuration. For browser-based clients, set comma-separated allowed origins:
@@ -460,6 +528,12 @@ INGEST_ALLOWED_ORIGINS="https://app.example.com,https://admin.example.com"
 ```
 
 Leave it empty to allow same-origin browser requests and server-to-server requests by default.
+
+### Security Headers and CSP
+
+TokenWatcher sets security headers for app and dashboard routes, including `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`, and Content Security Policy.
+
+Production CSP is intentionally strict: `default-src 'self'`, `object-src 'none'`, `frame-ancestors 'none'`, same-origin scripts, inline styles for the current Next.js styling path, and same-origin connections plus any explicit `CSP_CONNECT_SRC` entries. Development adds the script allowances Next.js needs locally. Set `CSP_REPORT_ONLY="true"` to test a deployment before enforcing CSP.
 
 ---
 
@@ -492,6 +566,7 @@ DASHBOARD_USERNAME="admin"
 DASHBOARD_PASSWORD="use-a-strong-password"
 DASHBOARD_SESSION_SECRET="your-long-random-secret"
 DASHBOARD_SESSION_COOKIE_NAME="tokenwatcher_session"
+CSRF_SECRET=""
 NEXTAUTH_URL="http://localhost:3000"
 
 # API key for SDK authentication
@@ -503,6 +578,8 @@ INGEST_RATE_LIMIT_WINDOW_SECONDS="60"
 INGEST_RATE_LIMIT_MAX_REQUESTS="120"
 INGEST_MAX_BATCH_SIZE="100"
 INGEST_ALLOWED_ORIGINS=""
+CSP_REPORT_ONLY="false"
+CSP_CONNECT_SRC=""
 
 # Prompt privacy
 STORE_PROMPTS="false"
@@ -524,6 +601,7 @@ SMTP_PASS="your-smtp-password"
 
 - Keep `DASHBOARD_AUTH_ENABLED="true"` when the dashboard is reachable from any network you do not fully trust.
 - Replace the default dashboard password and generate a strong `DASHBOARD_SESSION_SECRET`.
+- Keep dashboard CSRF protection enabled; set `CSRF_SECRET` only if you want a separate signing secret.
 - Use HTTPS in production so dashboard session cookies are sent securely.
 - Rotate `TOKENWATCHER_API_KEY` immediately if it is leaked.
 - Prefer DB-backed hashed API keys for production ingest traffic.
@@ -531,6 +609,7 @@ SMTP_PASS="your-smtp-password"
 - Keep `STORE_PROMPTS="false"` unless prompt retention is explicitly required.
 - Avoid sending PII in tags, metadata, prompts, or completions.
 - Configure `INGEST_ALLOWED_ORIGINS` for browser clients.
+- Validate CSP in report-only mode, then enforce it without wildcard production origins.
 - Use HTTPS webhook URLs in production and validate payloads on the receiving service.
 - Replace the in-memory rate limiter with a shared store before scaling beyond one instance.
 - Keep PostgreSQL backups and Prisma migrations under version control.

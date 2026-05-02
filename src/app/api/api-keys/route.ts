@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { requireDashboardAuth } from '@/lib/api-auth'
-import { generateApiKey } from '@/lib/auth'
+import { requireDashboardAuth, requireDashboardWrite } from '@/server/auth/dashboard-api'
+import { generateApiKey } from '@/server/auth/api-keys'
 import { prisma } from '@/lib/prisma'
+import { badRequest, handleApiError, jsonOk, notFound } from '@/server/security/errors'
 
 const CreateApiKeySchema = z.object({
   workspaceId: z.string().trim().min(1).max(100),
@@ -36,21 +37,20 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: 'desc' },
     })
 
-    return NextResponse.json({ apiKeys })
+    return jsonOk({ apiKeys })
   } catch (error) {
-    console.error('[TokenWatcher] API key list failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'API key list failed')
   }
 }
 
 export async function POST(req: NextRequest) {
-  const authError = await requireDashboardAuth(req)
+  const authError = await requireDashboardWrite(req)
   if (authError) return authError
 
   try {
     const parsed = CreateApiKeySchema.safeParse(await req.json().catch(() => ({})))
     if (!parsed.success) {
-      return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+      return badRequest()
     }
 
     const { rawKey, keyHash, keyPrefix } = generateApiKey(parsed.data.environment)
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
     })
 
     if (!workspace) {
-      return NextResponse.json({ error: 'Workspace not found' }, { status: 404 })
+      return notFound('Workspace not found')
     }
 
     if (parsed.data.projectId) {
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
       })
 
       if (!project) {
-        return NextResponse.json({ error: 'Project not found in workspace' }, { status: 400 })
+        return badRequest('Project not found in workspace')
       }
     }
 
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
       select: apiKeySelect,
     })
 
-    return NextResponse.json(
+    return jsonOk(
       {
         apiKey,
         rawKey,
@@ -95,7 +95,6 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     )
   } catch (error) {
-    console.error('[TokenWatcher] API key creation failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'API key creation failed')
   }
 }

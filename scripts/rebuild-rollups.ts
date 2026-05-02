@@ -1,12 +1,13 @@
 import { prisma } from '../src/lib/prisma'
 import { rebuildRollupsForDateRange } from '../src/lib/rollups'
+import { parseUtcDateInput } from '../src/lib/date'
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
 
   await rebuildRollupsForDateRange({
-    from: args.from ? new Date(args.from) : undefined,
-    to: args.to ? new Date(args.to) : undefined,
+    from: args.from ? parseUtcDateInput(args.from) : undefined,
+    to: args.to ? parseUtcDateInput(args.to, true) : undefined,
     workspaceId: args.workspaceId,
     chunkSize: args.chunkSize ? Number(args.chunkSize) : undefined,
   })

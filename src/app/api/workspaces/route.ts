@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { requireDashboardAuth } from '@/lib/api-auth'
-import { createSlug, ensureDefaultWorkspaceAndProject, ensureUniqueWorkspaceSlug } from '@/lib/workspaces'
+import { requireDashboardAuth, requireDashboardWrite } from '@/server/auth/dashboard-api'
+import { createSlug, ensureDefaultWorkspaceAndProject, ensureUniqueWorkspaceSlug } from '@/server/workspaces/service'
 import { prisma } from '@/lib/prisma'
+import { badRequest, handleApiError, jsonOk } from '@/server/security/errors'
 
 const WorkspaceSchema = z.object({
   name: z.string().trim().min(1).max(100),
@@ -29,21 +30,20 @@ export async function GET(req: NextRequest) {
       orderBy: [{ slug: 'asc' }, { createdAt: 'asc' }],
     })
 
-    return NextResponse.json({ workspaces })
+    return jsonOk({ workspaces })
   } catch (error) {
-    console.error('[TokenWatcher] Workspace list failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Workspace list failed')
   }
 }
 
 export async function POST(req: NextRequest) {
-  const authError = await requireDashboardAuth(req)
+  const authError = await requireDashboardWrite(req)
   if (authError) return authError
 
   try {
     const parsed = WorkspaceSchema.safeParse(await req.json().catch(() => ({})))
     if (!parsed.success) {
-      return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+      return badRequest()
     }
 
     const slug = await ensureUniqueWorkspaceSlug(createSlug(parsed.data.slug || parsed.data.name))
@@ -62,9 +62,8 @@ export async function POST(req: NextRequest) {
       select: workspaceSelect,
     })
 
-    return NextResponse.json({ workspace }, { status: 201 })
+    return jsonOk({ workspace }, { status: 201 })
   } catch (error) {
-    console.error('[TokenWatcher] Workspace creation failed:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return handleApiError(error, 'Workspace creation failed')
   }
 }

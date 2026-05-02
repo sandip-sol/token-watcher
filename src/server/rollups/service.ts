@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import type { LLMEvent } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { startOfUtcDay, startOfUtcHour } from '@/server/time/utc'
@@ -214,7 +215,7 @@ async function upsertRollupWithRawSql(
   dimension: { projectId: string; provider: string; model: string },
   time: Date
 ) {
-  const id = `${table}_${event.workspaceId}_${dimension.projectId}_${time.toISOString()}_${dimension.provider}_${dimension.model}`
+  const id = crypto.randomUUID()
   const values = rollupValues(event)
 
   if (table === 'DailyUsageRollup') {

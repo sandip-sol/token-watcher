@@ -32,8 +32,9 @@ export default function ProjectsPage() {
 
     try {
       const body = await getJson<{ workspaces: Workspace[] }>('/api/workspaces')
-      setWorkspaces(body.workspaces || [])
-      setWorkspaceId(current => current || body.workspaces?.[0]?.id || '')
+      const nextWorkspaces = body.workspaces || []
+      setWorkspaces(nextWorkspaces)
+      setWorkspaceId(current => current || (nextWorkspaces.length === 1 ? nextWorkspaces[0].id : ''))
     } catch {
       setError('Workspaces could not be loaded.')
     } finally {
@@ -95,7 +96,11 @@ export default function ProjectsPage() {
   }
 
   return (
-    <DashboardShell>
+    <DashboardShell
+      workspaces={workspaces}
+      workspaceId={workspaceId}
+      onWorkspaceChange={setWorkspaceId}
+    >
       <section className="tw-management-layout">
         <div className="tw-panel">
           <h1 className="tw-page-title">Projects / Settings</h1>

@@ -8,7 +8,7 @@ import { DashboardFilters } from '@/components/dashboard/DashboardFilters'
 import { RecentEventsTable } from '@/components/dashboard/RecentEventsTable'
 import { StatCards } from '@/components/dashboard/StatCards'
 import { UsageCharts } from '@/components/dashboard/UsageCharts'
-import { getJson } from '@/lib/client/dashboard-fetch'
+import { getJson, scopedDashboardUrl } from '@/lib/client/dashboard-fetch'
 
 interface StatsData {
   overview: {
@@ -56,14 +56,22 @@ export default function DashboardPage() {
 
     getJson<{ workspaces: Workspace[] }>('/api/workspaces')
       .then(body => {
-        setWorkspaces(body.workspaces)
-        if (!queryWorkspaceId && body.workspaces[0]) setWorkspaceId(body.workspaces[0].id)
+        const nextWorkspaces = body.workspaces || []
+        setWorkspaces(nextWorkspaces)
+        if (!queryWorkspaceId && nextWorkspaces.length === 1) {
+          setWorkspaceId(nextWorkspaces[0].id)
+        } else if (!queryWorkspaceId) {
+          setLoading(false)
+        }
       })
-      .catch(() => null)
+      .catch(() => setLoading(false))
   }, [])
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setProjects([])
+      return
+    }
     getJson<{ projects: Project[] }>(`/api/projects?workspaceId=${encodeURIComponent(workspaceId)}`)
       .then(body => setProjects(body.projects || []))
       .catch(() => setProjects([]))
@@ -80,8 +88,7 @@ export default function DashboardPage() {
     router.replace(`/dashboard?${params.toString()}`)
 
     setLoading(true)
-    params.set('days', String(days))
-    getJson<StatsData>(`/api/stats?${params.toString()}`)
+    getJson<StatsData>(scopedDashboardUrl('/api/stats', { workspaceId, projectId }, { provider, model, days }))
       .then(nextData => setData(nextData))
       .catch(() => null)
       .finally(() => setLoading(false))
@@ -89,6 +96,13 @@ export default function DashboardPage() {
 
   return (
     <DashboardShell
+      workspaces={workspaces}
+      workspaceId={workspaceId}
+      projectId={projectId}
+      onWorkspaceChange={nextWorkspaceId => {
+        setWorkspaceId(nextWorkspaceId)
+        setProjectId('')
+      }}
       actions={
         <DashboardFilters
           workspaces={workspaces}

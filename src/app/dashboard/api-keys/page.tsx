@@ -6,7 +6,7 @@ import { ApiKeyForm } from '@/components/dashboard/ApiKeyForm'
 import { ApiKeyTable, type ApiKeyRow } from '@/components/dashboard/ApiKeyTable'
 import { ErrorMessage } from '@/components/dashboard/ErrorMessage'
 import { DashboardShell } from '@/components/ui/DashboardShell'
-import { deleteJson, getJson, postJson } from '@/lib/client/dashboard-fetch'
+import { deleteJson, getJson, postJson, scopedDashboardUrl } from '@/lib/client/dashboard-fetch'
 
 type Workspace = { id: string; name: string }
 type Project = { id: string; workspaceId: string; name: string; environment: string | null }
@@ -26,43 +26,60 @@ export default function ApiKeysPage() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setProjects([])
+      return
+    }
     getJson<{ projects: Project[] }>(`/api/projects?workspaceId=${encodeURIComponent(workspaceId)}`)
       .then(body => setProjects(body.projects || []))
       .catch(() => setProjects([]))
   }, [workspaceId])
 
-  const loadApiKeys = useCallback(async function loadApiKeys() {
+  const loadApiKeys = useCallback(async function loadApiKeys(nextWorkspaceId = workspaceId, nextProjectId = projectId) {
+    if (!nextWorkspaceId) {
+      setApiKeys([])
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     setError('')
 
     try {
-      const body = await getJson<{ apiKeys: ApiKeyRow[] }>('/api/api-keys')
+      const body = await getJson<{ apiKeys: ApiKeyRow[] }>(
+        scopedDashboardUrl('/api/api-keys', { workspaceId: nextWorkspaceId, projectId: nextProjectId })
+      )
       setApiKeys(body.apiKeys)
     } catch {
       setError('API keys could not be loaded.')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [projectId, workspaceId])
 
   const loadWorkspaces = useCallback(async function loadWorkspaces() {
     try {
+      const params = new URLSearchParams(window.location.search)
+      const queryWorkspaceId = params.get('workspaceId') || ''
+      const queryProjectId = params.get('projectId') || ''
       const body = await getJson<{ workspaces: Workspace[] }>('/api/workspaces')
-      setWorkspaces(body.workspaces || [])
-      setWorkspaceId(current => current || body.workspaces?.[0]?.id || '')
+      const nextWorkspaces = body.workspaces || []
+      setWorkspaces(nextWorkspaces)
+      if (queryProjectId) setProjectId(queryProjectId)
+      setWorkspaceId(current => current || queryWorkspaceId || (nextWorkspaces.length === 1 ? nextWorkspaces[0].id : ''))
     } catch {
       setError('Workspaces could not be loaded.')
+      setLoading(false)
     }
   }, [])
 
-  const loadInitialData = useCallback(async function loadInitialData() {
-    await Promise.all([loadApiKeys(), loadWorkspaces()])
-  }, [loadApiKeys, loadWorkspaces])
+  useEffect(() => {
+    loadWorkspaces()
+  }, [loadWorkspaces])
 
   useEffect(() => {
-    loadInitialData()
-  }, [loadInitialData])
+    loadApiKeys(workspaceId, projectId)
+  }, [workspaceId, projectId, loadApiKeys])
 
   async function createApiKey(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -72,18 +89,21 @@ export default function ApiKeysPage() {
     setRawKey('')
 
     try {
-      const body = await postJson<{ rawKey: string }>('/api/api-keys', {
-        name,
-        environment,
-        workspaceId,
-        projectId: projectId || null,
-      })
+      const body = await postJson<{ rawKey: string }>(
+        scopedDashboardUrl('/api/api-keys', { workspaceId, projectId }),
+        {
+          name,
+          environment,
+          workspaceId,
+          projectId: projectId || null,
+        }
+      )
       setRawKey(body.rawKey)
       setMessage('API key created.')
       setName('')
       setEnvironment('live')
       setProjectId('')
-      await loadApiKeys()
+      await loadApiKeys(workspaceId, '')
     } catch {
       setError('API key could not be created.')
     } finally {
@@ -105,7 +125,15 @@ export default function ApiKeysPage() {
   }
 
   return (
-    <DashboardShell>
+    <DashboardShell
+      workspaces={workspaces}
+      workspaceId={workspaceId}
+      projectId={projectId}
+      onWorkspaceChange={nextWorkspaceId => {
+        setWorkspaceId(nextWorkspaceId)
+        setProjectId('')
+      }}
+    >
       <section className="tw-management-layout">
         <div className="tw-panel">
           <h1 className="tw-page-title">API Keys</h1>

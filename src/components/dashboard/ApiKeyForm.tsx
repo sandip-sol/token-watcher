@@ -24,6 +24,7 @@ export function ApiKeyForm(props: ApiKeyFormProps) {
       <label className="tw-field">
         Workspace
         <select required value={props.workspaceId} onChange={event => props.onWorkspaceChange(event.target.value)}>
+          <option value="">Select workspace</option>
           {props.workspaces.map(workspace => (
             <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
           ))}

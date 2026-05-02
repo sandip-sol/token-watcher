@@ -52,6 +52,24 @@ export function getJson<T>(url: string): Promise<T> {
   return dashboardFetch<T>(url)
 }
 
+export function scopedDashboardUrl(
+  path: string,
+  scope: { workspaceId: string; projectId?: string },
+  params: Record<string, string | number | null | undefined> = {}
+): string {
+  const searchParams = new URLSearchParams()
+  searchParams.set('workspaceId', scope.workspaceId)
+  if (scope.projectId) searchParams.set('projectId', scope.projectId)
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      searchParams.set(key, String(value))
+    }
+  })
+
+  return `${path}?${searchParams.toString()}`
+}
+
 export function postJson<T>(url: string, body?: unknown): Promise<T> {
   return dashboardFetch<T>(url, {
     method: 'POST',

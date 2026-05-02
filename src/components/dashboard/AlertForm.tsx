@@ -31,6 +31,7 @@ export function AlertForm({ workspaces, projects, workspaceId, form, saving, onW
       <label className="tw-field">
         Workspace
         <select required value={workspaceId} onChange={event => onWorkspaceChange(event.target.value)}>
+          <option value="">Select workspace</option>
           {workspaces.map(workspace => (
             <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
           ))}

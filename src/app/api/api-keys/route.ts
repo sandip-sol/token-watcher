@@ -3,7 +3,8 @@ import { z } from 'zod'
 import { requireDashboardAuth, requireDashboardWrite } from '@/server/auth/dashboard-api'
 import { generateApiKey } from '@/server/auth/api-keys'
 import { prisma } from '@/lib/prisma'
-import { badRequest, handleApiError, jsonOk, notFound } from '@/server/security/errors'
+import { resolveWorkspaceSelection } from '@/server/workspaces/service'
+import { badRequest, handleApiError, jsonError, jsonOk, notFound } from '@/server/security/errors'
 
 const CreateApiKeySchema = z.object({
   workspaceId: z.string().trim().min(1).max(100),
@@ -32,7 +33,21 @@ export async function GET(req: NextRequest) {
   if (authError) return authError
 
   try {
+    const { searchParams } = new URL(req.url)
+    const selection = await resolveWorkspaceSelection({
+      workspaceId: searchParams.get('workspaceId'),
+      projectId: searchParams.get('projectId'),
+    })
+
+    if (selection.ok === false) {
+      return jsonError(selection.status, selection.status === 404 ? 'NOT_FOUND' : 'BAD_REQUEST', selection.error)
+    }
+
     const apiKeys = await prisma.apiKey.findMany({
+      where: {
+        workspaceId: selection.workspaceId,
+        ...(selection.projectId ? { projectId: selection.projectId } : {}),
+      },
       select: apiKeySelect,
       orderBy: { createdAt: 'desc' },
     })

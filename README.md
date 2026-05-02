@@ -511,6 +511,11 @@ INGEST_RATE_LIMIT_MAX_REQUESTS="120"
 
 Limits are applied by API key identity when possible, otherwise by client IP. This is suitable for single-instance deployments only. Use Redis or another shared store before running multiple app instances.
 
+Note: the in-memory rate limiter works correctly for Docker/VPS deployments.
+If deploying to serverless platforms (Vercel, AWS Lambda), set
+INGEST_RATE_LIMIT_ENABLED=false as each function instance has its own memory.
+Redis-backed rate limiting is on the roadmap.
+
 ### Ingest Cost Integrity
 
 TokenWatcher calculates `totalCostUsd` server-side from provider, model, input tokens, and output tokens by default. Public ingest clients may send `totalCostUsd` for backward compatibility, but it is ignored unless `ALLOW_INGEST_COST_OVERRIDE="true"`.

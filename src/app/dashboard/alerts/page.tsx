@@ -6,7 +6,7 @@ import { AlertHistoryTable, type AlertHistoryRow } from '@/components/dashboard/
 import { AlertTable, type AlertRuleRow } from '@/components/dashboard/AlertTable'
 import { ErrorMessage } from '@/components/dashboard/ErrorMessage'
 import { DashboardShell } from '@/components/ui/DashboardShell'
-import { dashboardFetch, deleteJson, getJson, patchJson, postJson } from '@/lib/client/dashboard-fetch'
+import { dashboardFetch, deleteJson, getJson, patchJson, postJson, scopedDashboardUrl } from '@/lib/client/dashboard-fetch'
 
 type Workspace = { id: string; name: string }
 type Project = { id: string; workspaceId: string; name: string }
@@ -37,24 +37,42 @@ export default function AlertsPage() {
 
   const loadWorkspaces = useCallback(async function loadWorkspaces() {
     try {
+      const params = new URLSearchParams(window.location.search)
+      const queryWorkspaceId = params.get('workspaceId') || ''
+      const queryProjectId = params.get('projectId') || ''
       const body = await getJson<{ workspaces: Workspace[] }>('/api/workspaces')
-      setWorkspaces(body.workspaces || [])
-      setWorkspaceId(current => current || body.workspaces?.[0]?.id || '')
+      const nextWorkspaces = body.workspaces || []
+      setWorkspaces(nextWorkspaces)
+      if (queryProjectId) {
+        setProjectId(queryProjectId)
+        setForm(current => ({ ...current, projectId: queryProjectId }))
+      }
+      setWorkspaceId(current => current || queryWorkspaceId || (nextWorkspaces.length === 1 ? nextWorkspaces[0].id : ''))
     } catch {
       setError('Workspaces could not be loaded.')
+      setLoading(false)
     }
   }, [])
 
   const loadAlerts = useCallback(async function loadAlerts(nextWorkspaceId = workspaceId, nextProjectId = projectId) {
+    if (!nextWorkspaceId) {
+      setAlerts([])
+      setHistory([])
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     setError('')
 
     try {
-      const params = new URLSearchParams({ workspaceId: nextWorkspaceId })
-      if (nextProjectId) params.set('projectId', nextProjectId)
       const [alertsBody, historyBody] = await Promise.all([
-        getJson<{ alerts: AlertRuleRow[] }>(`/api/alerts?${params.toString()}`),
-        getJson<{ history: AlertHistoryRow[] }>(`/api/alerts/history?${params.toString()}`),
+        getJson<{ alerts: AlertRuleRow[] }>(
+          scopedDashboardUrl('/api/alerts', { workspaceId: nextWorkspaceId, projectId: nextProjectId })
+        ),
+        getJson<{ history: AlertHistoryRow[] }>(
+          scopedDashboardUrl('/api/alerts/history', { workspaceId: nextWorkspaceId, projectId: nextProjectId })
+        ),
       ])
 
       setAlerts(alertsBody.alerts)
@@ -71,10 +89,16 @@ export default function AlertsPage() {
   }, [loadWorkspaces])
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setProjects([])
+      return
+    }
     getJson<{ projects: Project[] }>(`/api/projects?workspaceId=${encodeURIComponent(workspaceId)}`)
       .then(body => setProjects(body.projects || []))
       .catch(() => setProjects([]))
+  }, [workspaceId])
+
+  useEffect(() => {
     loadAlerts(workspaceId, projectId)
   }, [workspaceId, projectId, loadAlerts])
 
@@ -85,7 +109,7 @@ export default function AlertsPage() {
     setMessage('')
 
     try {
-      await postJson('/api/alerts', {
+      await postJson(scopedDashboardUrl('/api/alerts', { workspaceId, projectId: form.projectId }), {
         ...form,
         workspaceId,
         projectId: form.projectId || null,
@@ -96,7 +120,8 @@ export default function AlertsPage() {
       })
       setMessage('Alert created.')
       setForm(initialForm)
-      await loadAlerts()
+      setProjectId('')
+      await loadAlerts(workspaceId, '')
     } catch {
       setError('Alert could not be created. Check the type, threshold, model, and webhook URL.')
     } finally {
@@ -128,8 +153,13 @@ export default function AlertsPage() {
     setError('')
     setMessage('')
 
+    if (!workspaceId) {
+      setError('Select a workspace before running alert evaluation.')
+      return
+    }
+
     try {
-      await dashboardFetch('/api/alerts/evaluate', { method: 'POST' })
+      await dashboardFetch(scopedDashboardUrl('/api/alerts/evaluate', { workspaceId, projectId }), { method: 'POST' })
       setMessage('Alert evaluation completed.')
       await loadAlerts()
     } catch {
@@ -155,7 +185,17 @@ export default function AlertsPage() {
   }
 
   return (
-    <DashboardShell actions={<button className="tw-secondary-btn" type="button" onClick={runEvaluation}>Run evaluation</button>}>
+    <DashboardShell
+      workspaces={workspaces}
+      workspaceId={workspaceId}
+      projectId={projectId}
+      onWorkspaceChange={nextWorkspaceId => {
+        setWorkspaceId(nextWorkspaceId)
+        setProjectId('')
+        setForm({ ...form, projectId: '' })
+      }}
+      actions={<button className="tw-secondary-btn" type="button" disabled={!workspaceId} onClick={runEvaluation}>Run evaluation</button>}
+    >
       <section className="tw-management-layout">
         <div className="tw-panel">
           <h1 className="tw-page-title">Alerts</h1>
@@ -174,7 +214,10 @@ export default function AlertsPage() {
               setProjectId('')
               setForm({ ...form, projectId: '' })
             }}
-            onFormChange={setForm}
+            onFormChange={nextForm => {
+              setForm(nextForm)
+              setProjectId(nextForm.projectId)
+            }}
             onSubmit={createAlert}
           />
 

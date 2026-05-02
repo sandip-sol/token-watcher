@@ -102,6 +102,17 @@ button {
   color: #ffffff;
 }
 
+.tw-nav-workspace-select {
+  background: var(--tw-surface);
+  border: 1px solid var(--tw-border);
+  border-radius: 8px;
+  color: var(--tw-text);
+  font-size: 14px;
+  font-weight: 700;
+  min-width: 180px;
+  padding: 8px 10px;
+}
+
 .tw-logout-form {
   margin: 0;
 }

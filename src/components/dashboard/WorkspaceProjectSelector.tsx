@@ -29,6 +29,7 @@ export function WorkspaceProjectSelector({
         value={workspaceId}
         onChange={event => onWorkspaceChange(event.target.value)}
       >
+        <option value="">Select workspace</option>
         {workspaces.map(workspace => (
           <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
         ))}

@@ -52,8 +52,8 @@ jobs:
           - 5432:5432
 
     env:
-      DATABASE_URL: postgresql://postgres.viknxrgfiqugdvhfyxze:@@12btece031@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true
-      DIRECT_URL: postgresql://postgres.viknxrgfiqugdvhfyxze:@@12btece031@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DIRECT_URL: ${{ secrets.DIRECT_URL }}
       TOKENWATCHER_API_KEY: tw_test_key
       NEXTAUTH_SECRET: test-secret
       NEXTAUTH_URL: http://localhost:3000
